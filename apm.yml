@@ -7,6 +7,7 @@ author: krystian
 # Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, kiro, opencode, windsurf
 targets:
   - claude
+  - copilot
 dependencies:
   apm:
     - mattpocock/skills#5beb35b0
