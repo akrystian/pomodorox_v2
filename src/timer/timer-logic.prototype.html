@@ -1,0 +1,511 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. Answers one question about the timer/session state model. Not production code. -->
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYP · Logika timera Pomodorox</title>
+<style>
+  :root { --accent:#c2410c; --ink:#1c1917; --muted:#78716c; --line:#e7e5e4; --bg:#fafaf9; --card:#fff; --warn:#b91c1c; --ok:#15803d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:15px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
+  .intro { color:var(--muted); max-width:780px; margin:0 0 20px; }
+  .tag { display:inline-block; background:var(--accent); color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:99px; vertical-align:middle; margin-right:8px; }
+  .grid { display:grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap:16px; align-items:start; }
+  @media (max-width:860px){ .grid { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  button { font:inherit; border:1px solid var(--line); background:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+  .label { color:var(--muted); font-size:13px; min-width:120px; }
+  .big { font-size:40px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:0; }
+  dt { color:var(--muted); } dd { margin:0; font-weight:500; }
+  .changed { background:#fff7ed; border-radius:4px; outline:2px solid #fed7aa; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
+  .task { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; }
+  .task.active { border-color:var(--accent); background:#fff7ed; }
+  .task .name { flex:1; } .count { font-variant-numeric:tabular-nums; font-weight:600; }
+  .over { color:var(--warn); }
+  .task button { padding:2px 8px; font-size:13px; }
+  .outcome { padding:10px 12px; border-radius:8px; margin-bottom:8px; }
+  .outcome.ok { background:#f0fdf4; } .outcome.rejected { background:#fef2f2; color:var(--warn); } .outcome.confirm { background:#fff7ed; }
+  .effects { margin:6px 0 0; padding-left:18px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+  .tabs button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .steps { display:flex; flex-direction:column; gap:6px; }
+  .steps button { text-align:left; }
+  .steps button.done { color:var(--ok); border-color:#bbf7d0; background:#f0fdf4; }
+  .steps button.next { border-color:var(--accent); box-shadow:0 0 0 2px #fed7aa; }
+  input { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:8px; }
+  .muted { color:var(--muted); font-size:13px; }
+  details summary { cursor:pointer; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1><span class="tag">PROTOTYP</span>Logika timera Pomodorox</h1>
+  <p class="intro">
+    <strong>Pytanie:</strong> czy model stanów timera jest dobry? Sprawdzamy start, pauzę, wznowienie, stop, przełączanie sesji z potwierdzeniem,
+    zamknięcie i ponowne otwarcie aplikacji po upływie czasu, blokadę Active Task w trakcie pracy, licznik Pomodoro i Event Log.
+    Czas jest symulowany: przesuwasz go przyciskami „+ minuty”. Uruchom scenariusz z zakładek albo klikaj dowolnie.
+    Szukaj momentów typu <em>„chwila, to nie powinno być możliwe”</em>.
+  </p>
+
+  <div class="grid">
+    <div>
+      <div class="card" id="stateCard"></div>
+      <div class="card" id="tasksCard"></div>
+      <div class="card" id="logCard"></div>
+    </div>
+    <div>
+      <div class="card" id="lastCard"></div>
+      <div class="card" id="walkCard"></div>
+      <div class="card" id="playCard"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ───────────── The liftable logic module: pure, no DOM. ───────────── -->
+<script>
+const SessionModel = (() => {
+  const MIN = 60_000;
+  const DURATIONS = { work: 25 * MIN, shortBreak: 5 * MIN, longBreak: 15 * MIN };
+
+  const initialState = () => ({
+    tasks: [],            // { id, name, estimate, pomodoroCount, done } — array order is Priority
+    nextId: 1,
+    activeTaskId: null,
+    session: null,        // { kind, taskId, startedAt, pausedAt, pausedTotal }
+    events: [],           // { at, type, kind, taskName, durationMs }
+    appOpen: true,
+    settings: { soundOn: true, notificationsOn: true, permission: 'unknown', permissionAsked: false },
+  });
+
+  const runTime = (s, at) =>
+    at - s.startedAt - s.pausedTotal - (s.pausedAt != null ? at - s.pausedAt : 0);
+  const remaining = (s, at) => Math.max(0, DURATIONS[s.kind] - runTime(s, at));
+  const scheduledEnd = (s) => s.startedAt + s.pausedTotal + DURATIONS[s.kind];
+  const taskName = (state, id) => state.tasks.find(t => t.id === id)?.name ?? null;
+
+  const ok = (state, effects = []) => ({ state, outcome: { type: 'ok' }, effects });
+  const reject = (state, reason) => ({ state, outcome: { type: 'rejected', reason }, effects: [] });
+  const needConfirm = (state, question) => ({ state, outcome: { type: 'confirm', question }, effects: [] });
+
+  const logEvent = (state, at, type, durationMs = null) => ({
+    ...state,
+    events: [...state.events, {
+      at, type, kind: state.session.kind,
+      taskName: taskName(state, state.session.taskId), durationMs,
+    }],
+  });
+
+  function abandon(state, at) {
+    const s = logEvent(state, at, 'abandoned', runTime(state.session, at));
+    return { ...s, session: null };
+  }
+
+  function complete(state, at, { silent }) {
+    const { kind, taskId } = state.session;
+    let s = logEvent(state, at, 'completed', DURATIONS[kind]);
+    if (kind === 'work') {
+      s = { ...s, tasks: s.tasks.map(t => t.id === taskId ? { ...t, pomodoroCount: t.pomodoroCount + 1 } : t) };
+    }
+    s = { ...s, session: null };
+    const task = s.tasks.find(t => t.id === taskId);
+    const what = kind === 'work' ? `Praca zakończona: ${task.name} (${task.pomodoroCount}/${task.estimate}). Czas na przerwę.`
+                                 : 'Przerwa zakończona. Wracamy do pracy?';
+    const effects = [];
+    if (silent) {
+      effects.push({ type: 'banner', text: `${what} (sesja zakończyła się, gdy aplikacja była zamknięta)` });
+    } else {
+      if (s.settings.soundOn) effects.push({ type: 'sound' });
+      if (s.settings.notificationsOn && s.settings.permission === 'granted') effects.push({ type: 'notification', text: what });
+      effects.push({ type: 'banner', text: what });
+    }
+    return ok(s, effects);
+  }
+
+  const workRunning = (state) => state.session?.kind === 'work';
+
+  function reduce(state, action) {
+    const at = action.at;
+    if (!state.appOpen && !['REOPEN', 'TICK'].includes(action.type)) return reject(state, 'Aplikacja jest zamknięta.');
+
+    switch (action.type) {
+      case 'ADD_TASK': {
+        const estimate = Number(action.estimate);
+        if (!action.name?.trim()) return reject(state, 'Zadanie musi mieć nazwę.');
+        if (!Number.isInteger(estimate) || estimate < 1) return reject(state, 'Estimate musi być liczbą całkowitą ≥ 1.');
+        const task = { id: state.nextId, name: action.name.trim(), estimate, pomodoroCount: action.pomodoroCount ?? 0, done: false };
+        return ok({ ...state, tasks: [...state.tasks, task], nextId: state.nextId + 1 });
+      }
+
+      case 'SELECT_TASK': {
+        const task = state.tasks.find(t => t.id === action.id);
+        if (!task || task.done) return reject(state, 'Nie można wybrać zadania oznaczonego jako Done.');
+        if (workRunning(state) && action.id !== state.activeTaskId)
+          return reject(state, 'W trakcie pracy Active Task jest zablokowany.');
+        return ok({ ...state, activeTaskId: action.id });
+      }
+
+      case 'MOVE_UP': {
+        const open = state.tasks.filter(t => !t.done);
+        const i = open.findIndex(t => t.id === action.id);
+        if (i <= 0) return reject(state, 'Zadanie jest już na górze.');
+        [open[i - 1], open[i]] = [open[i], open[i - 1]];
+        return ok({ ...state, tasks: [...open, ...state.tasks.filter(t => t.done)] });
+      }
+
+      case 'START': {
+        if (action.kind === 'work' && state.activeTaskId == null) return reject(state, 'Najpierw wybierz Active Task.');
+        if (state.session && !action.confirmed) return needConfirm(state, 'Porzucić bieżącą sesję i zacząć nową?');
+        let s = state.session ? abandon(state, at) : state;
+        const effects = [];
+        if (!s.settings.permissionAsked) {
+          effects.push({ type: 'permissionPrompt' });
+          s = { ...s, settings: { ...s.settings, permissionAsked: true } };
+        }
+        s = { ...s, session: { kind: action.kind, taskId: action.kind === 'work' ? s.activeTaskId : null, startedAt: at, pausedAt: null, pausedTotal: 0 } };
+        return ok(logEvent(s, at, 'started'), effects);
+      }
+
+      case 'PAUSE':
+        if (!state.session || state.session.pausedAt != null) return reject(state, 'Nie ma trwającej sesji do zapauzowania.');
+        return ok(logEvent({ ...state, session: { ...state.session, pausedAt: at } }, at, 'paused'));
+
+      case 'RESUME': {
+        const s = state.session;
+        if (!s || s.pausedAt == null) return reject(state, 'Sesja nie jest zapauzowana.');
+        return ok(logEvent({ ...state, session: { ...s, pausedAt: null, pausedTotal: s.pausedTotal + (at - s.pausedAt) } }, at, 'resumed'));
+      }
+
+      case 'STOP':
+        if (!state.session) return reject(state, 'Nie ma sesji do zatrzymania.');
+        return ok(abandon(state, at));
+
+      case 'TICK': {
+        const s = state.session;
+        if (!state.appOpen || !s || s.pausedAt != null || remaining(s, at) > 0) return ok(state);
+        return complete(state, scheduledEnd(s), { silent: false });
+      }
+
+      case 'CLOSE_APP':
+        return ok({ ...state, appOpen: false });
+
+      case 'REOPEN': {
+        if (state.appOpen) return reject(state, 'Aplikacja jest już otwarta.');
+        const s = { ...state, appOpen: true };
+        if (s.session && s.session.pausedAt == null && remaining(s.session, at) === 0)
+          return complete(s, scheduledEnd(s.session), { silent: true });
+        return ok(s);
+      }
+
+      case 'MARK_DONE':
+      case 'DELETE': {
+        const isDelete = action.type === 'DELETE';
+        const hitsRunningWork = workRunning(state) && action.id === state.activeTaskId;
+        if (!action.confirmed && (isDelete || hitsRunningWork))
+          return needConfirm(state, hitsRunningWork
+            ? `To Active Task trwającej sesji pracy. Porzucić sesję i ${isDelete ? 'usunąć' : 'oznaczyć jako Done'}?`
+            : 'Usunąć zadanie? Jego zdarzenia zostaną w dzienniku.');
+        let s = hitsRunningWork ? abandon(state, at) : state;
+        s = isDelete ? { ...s, tasks: s.tasks.filter(t => t.id !== action.id) }
+                     : { ...s, tasks: s.tasks.map(t => t.id === action.id ? { ...t, done: true } : t) };
+        if (s.activeTaskId === action.id) s = { ...s, activeTaskId: null };
+        return ok(s);
+      }
+
+      case 'RESTORE':
+        return ok({ ...state, tasks: [...state.tasks.filter(t => !t.done), ...state.tasks.filter(t => t.done).map(t => t.id === action.id ? { ...t, done: false } : t)]
+          .sort((a, b) => a.done - b.done) });
+
+      case 'CLEAR_LOG':
+        if (!action.confirmed) return needConfirm(state, 'Usunąć wszystkie zdarzenia? Tego nie da się cofnąć.');
+        return ok({ ...state, events: [] });
+
+      case 'TOGGLE_SOUND':
+        return ok({ ...state, settings: { ...state.settings, soundOn: !state.settings.soundOn } });
+
+      case 'TOGGLE_NOTIFICATIONS':
+        if (state.settings.permission === 'denied') return reject(state, 'Przeglądarka odmówiła zgody — włącz ją w ustawieniach przeglądarki.');
+        return ok({ ...state, settings: { ...state.settings, notificationsOn: !state.settings.notificationsOn } });
+
+      case 'PERMISSION_ANSWER':
+        return ok({ ...state, settings: { ...state.settings, permission: action.granted ? 'granted' : 'denied' } });
+
+      default:
+        return reject(state, `Nieznana akcja ${action.type}`);
+    }
+  }
+
+  return { reduce, initialState, remaining, DURATIONS, MIN };
+})();
+</script>
+
+<!-- ───────────── Throwaway page shell. ───────────── -->
+<script>
+const { reduce, initialState, remaining, MIN } = SessionModel;
+const START_CLOCK = new Date(2026, 9, 24, 9, 0, 0).getTime();
+const DAY = 24 * 60 * MIN;
+
+const KIND = { work: 'Praca (25)', shortBreak: 'Krótka przerwa (5)', longBreak: 'Długa przerwa (15)' };
+const KIND_SHORT = { work: 'Praca', shortBreak: 'Krótka przerwa', longBreak: 'Długa przerwa' };
+const EVENT = { started: 'Rozpoczęta', paused: 'Wstrzymana', resumed: 'Wznowiona', completed: 'Ukończona', abandoned: 'Porzucona' };
+const ACTION_LABEL = {
+  ADD_TASK: 'Dodaj zadanie', SELECT_TASK: 'Wybierz Active Task', MOVE_UP: 'Przesuń wyżej', START: 'Start',
+  PAUSE: 'Pauza', RESUME: 'Wznów', STOP: 'Stop', TICK: 'Upływ czasu', CLOSE_APP: 'Zamknij aplikację',
+  REOPEN: 'Otwórz aplikację ponownie', MARK_DONE: 'Oznacz jako Done', DELETE: 'Usuń zadanie', RESTORE: 'Przywróć',
+  CLEAR_LOG: 'Wyczyść dziennik', TOGGLE_SOUND: 'Przełącz dźwięk', TOGGLE_NOTIFICATIONS: 'Przełącz powiadomienia',
+  PERMISSION_ANSWER: 'Odpowiedź na prośbę o zgodę',
+};
+
+let state, now, last, pending, prevSummary, scenario = null, stepIndex = 0;
+
+function seed() {
+  state = initialState(); now = START_CLOCK; last = null; pending = null; prevSummary = null;
+  for (const t of [{ name: 'Raport kwartalny', estimate: 4, pomodoroCount: 2 }, { name: 'Maile', estimate: 1 }])
+    state = reduce(state, { type: 'ADD_TASK', at: now, ...t }).state;
+}
+
+function dispatch(action) {
+  prevSummary = summary();
+  const result = reduce(state, { ...action, at: now });
+  state = result.state;
+  last = { action, ...result };
+  pending = result.outcome.type === 'confirm' ? action : null;
+  render();
+}
+
+function advance(ms) {
+  prevSummary = summary();
+  now += ms;
+  const result = reduce(state, { type: 'TICK', at: now });
+  state = result.state;
+  last = { action: { type: 'TICK', label: `+${fmtDur(ms)}` }, ...result };
+  pending = null;
+  render();
+}
+
+const pad = n => String(n).padStart(2, '0');
+const fmtClock = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fmtDay = ms => new Date(ms).toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtLeft = ms => `${pad(Math.floor(ms / MIN))}:${pad(Math.floor(ms % MIN / 1000))}`;
+const fmtDur = ms => ms >= DAY ? `${Math.round(ms / DAY)} dzień` : ms >= 60 * MIN ? `${Math.round(ms / MIN)} min` : `${Math.round(ms / MIN)} min`;
+const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function summary() {
+  const s = state.session, active = state.tasks.find(t => t.id === state.activeTaskId);
+  return {
+    'Zegar': `${fmtDay(now)}, ${fmtClock(now)}`,
+    'Aplikacja': state.appOpen ? 'otwarta' : 'zamknięta',
+    'Sesja': s ? `${KIND_SHORT[s.kind]} — ${s.pausedAt != null ? 'zapauzowana' : 'trwa'}` : 'brak',
+    'Pozostało': s ? fmtLeft(remaining(s, now)) : '—',
+    'Active Task': active ? `${active.name} (${active.pomodoroCount}/${active.estimate})` : 'nie wybrano',
+    'Tytuł karty': s ? `${fmtLeft(remaining(s, now))} · ${KIND_SHORT[s.kind]}` : 'Pomodorox',
+    'Dźwięk 🔔': state.settings.soundOn ? 'wł.' : 'wył.',
+    'Powiadomienia 🖥️': state.settings.permission === 'denied' ? 'zablokowane przez przeglądarkę'
+      : `${state.settings.notificationsOn ? 'wł.' : 'wył.'} (zgoda: ${{ unknown: 'jeszcze nie pytano', granted: 'udzielona' }[state.settings.permission]})`,
+  };
+}
+
+function render() {
+  const sum = summary();
+  const s = state.session;
+
+  document.getElementById('stateCard').innerHTML = `
+    <h2>Bieżący stan</h2>
+    <div class="big">${s ? fmtLeft(remaining(s, now)) : '25:00'}</div>
+    <dl>${Object.entries(sum).map(([k, v]) =>
+      `<dt>${k}</dt><dd class="${prevSummary && prevSummary[k] !== v ? 'changed' : ''}">${esc(v)}</dd>`).join('')}</dl>`;
+
+  const open = state.tasks.filter(t => !t.done), done = state.tasks.filter(t => t.done);
+  const taskRow = t => `
+    <div class="task ${t.id === state.activeTaskId ? 'active' : ''}">
+      <span class="name">${esc(t.name)}${t.id === state.activeTaskId ? ' <span class="muted">· Active</span>' : ''}</span>
+      <span class="count ${t.pomodoroCount > t.estimate ? 'over' : ''}">${t.pomodoroCount}/${t.estimate}</span>
+      ${t.done ? `<button onclick="dispatch({type:'RESTORE',id:${t.id}})">Przywróć</button>` : `
+        <button onclick="dispatch({type:'SELECT_TASK',id:${t.id}})">Wybierz</button>
+        <button onclick="dispatch({type:'MOVE_UP',id:${t.id}})">↑</button>
+        <button onclick="dispatch({type:'MARK_DONE',id:${t.id}})">Done</button>`}
+      <button onclick="dispatch({type:'DELETE',id:${t.id}})">Usuń</button>
+    </div>`;
+  document.getElementById('tasksCard').innerHTML = `
+    <h2>Zadania (kolejność = priorytet)</h2>
+    ${open.map(taskRow).join('') || '<p class="muted">Brak zadań — dodaj zadanie, aby zacząć.</p>'}
+    <details ${done.length ? '' : 'hidden'}><summary>Done (${done.length})</summary>${done.map(taskRow).join('')}</details>
+    <div class="row" style="margin-top:10px">
+      <input id="newName" placeholder="Nazwa zadania" size="18">
+      <input id="newEst" type="number" min="1" value="1" style="width:64px" title="Estimate">
+      <button onclick="dispatch({type:'ADD_TASK',name:newName.value,estimate:newEst.value})">+ Dodaj</button>
+    </div>`;
+
+  const today = state.events.filter(e => sameDay(e.at, now)).slice().reverse();
+  document.getElementById('logCard').innerHTML = `
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Dziennik (dziś)</h2>
+      <button onclick="dispatch({type:'CLEAR_LOG'})">Wyczyść</button></div>
+    <table><thead><tr><th>Godzina</th><th>Zdarzenie</th><th>Rodzaj</th><th>Zadanie</th><th>Czas</th></tr></thead>
+    <tbody>${today.map(e => `<tr><td>${fmtClock(e.at)}</td><td>${EVENT[e.type]}</td><td>${KIND_SHORT[e.kind]}</td>
+      <td>${esc(e.taskName ?? '—')}</td><td>${e.durationMs != null ? Math.round(e.durationMs / MIN) + ' min' : ''}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="muted">Brak zdarzeń dzisiaj.</td></tr>'}</tbody></table>
+    <p class="muted">Łącznie w pamięci: ${state.events.length} zdarzeń (także z poprzednich dni).</p>`;
+
+  let lastHtml = '<p class="muted">Kliknij coś, a tutaj zobaczysz, co się stało.</p>';
+  if (last) {
+    const o = last.outcome;
+    const head = o.type === 'ok' ? '✓ Wykonano' : o.type === 'rejected' ? `✗ Odrzucono: ${esc(o.reason)}` : `? Wymaga potwierdzenia: ${esc(o.question)}`;
+    const fx = last.effects.map(e => ({
+      sound: '🔊 Dźwięk', notification: `🖥️ Powiadomienie systemowe: „${esc(e.text)}”`,
+      banner: `💬 Komunikat w aplikacji: „${esc(e.text)}”`, permissionPrompt: '❓ Przeglądarka pyta o zgodę na powiadomienia',
+    }[e.type]));
+    lastHtml = `
+      <div class="outcome ${o.type}"><strong>${esc(last.action.label ?? ACTION_LABEL[last.action.type])}</strong> — ${head}
+        ${fx.length ? `<ul class="effects">${fx.map(f => `<li>${f}</li>`).join('')}</ul>` : last.action.type === 'TICK' ? '' : '<div class="muted">Brak dźwięku i powiadomień.</div>'}</div>
+      ${pending ? `<div class="row"><button class="primary" onclick="confirmPending()">Potwierdź</button><button onclick="cancelPending()">Anuluj</button></div>` : ''}`;
+  }
+  const askPerm = state.settings.permissionAsked && state.settings.permission === 'unknown';
+  document.getElementById('lastCard').innerHTML = `<h2>Ostatnia akcja i jej skutki</h2>${lastHtml}
+    ${askPerm ? `<div class="row"><span class="label">Prośba o zgodę:</span>
+      <button onclick="dispatch({type:'PERMISSION_ANSWER',granted:true})">Zezwól</button>
+      <button onclick="dispatch({type:'PERMISSION_ANSWER',granted:false})">Odmów</button></div>` : ''}`;
+
+  renderWalkthroughs();
+
+  document.getElementById('playCard').innerHTML = `
+    <h2>Swobodna zabawa</h2>
+    <div class="row"><span class="label">Timer</span>
+      <button onclick="dispatch({type:'START',kind:'work'})">${KIND.work}</button>
+      <button onclick="dispatch({type:'START',kind:'shortBreak'})">${KIND.shortBreak}</button>
+      <button onclick="dispatch({type:'START',kind:'longBreak'})">${KIND.longBreak}</button></div>
+    <div class="row"><span class="label"></span>
+      <button onclick="dispatch({type:'PAUSE'})">⏸ Pauza</button>
+      <button onclick="dispatch({type:'RESUME'})">▶ Wznów</button>
+      <button onclick="dispatch({type:'STOP'})">⏹ Stop</button></div>
+    <div class="row"><span class="label">Upływ czasu</span>
+      ${[1, 5, 10, 20, 25, 60].map(m => `<button onclick="advance(${m * MIN})">+${m} min</button>`).join('')}
+      <button onclick="advance(${DAY})">+1 dzień</button></div>
+    <div class="row"><span class="label">Aplikacja</span>
+      <button onclick="dispatch({type:'CLOSE_APP'})">Zamknij</button>
+      <button onclick="dispatch({type:'REOPEN'})">Otwórz ponownie</button></div>
+    <div class="row"><span class="label">Przełączniki</span>
+      <button onclick="dispatch({type:'TOGGLE_SOUND'})">🔔 Dźwięk</button>
+      <button onclick="dispatch({type:'TOGGLE_NOTIFICATIONS'})">🖥️ Powiadomienia</button></div>
+    <div class="row"><span class="label">Reset</span><button onclick="scenario=null;seed();render()">Zacznij od nowa</button></div>`;
+}
+
+function confirmPending() { const a = pending; pending = null; dispatch({ ...a, confirmed: true }); }
+function cancelPending() { pending = null; last = { action: { label: 'Anulowano' }, outcome: { type: 'ok' }, effects: [] }; render(); }
+
+// ── Guided walkthroughs: each step is a real action. ──
+const R = 1, M = 2; // seeded task ids: Raport kwartalny, Maile
+const go = (label, fn) => ({ label, fn });
+const SCENARIOS = [
+  { title: 'Szczęśliwa ścieżka',
+    desc: 'Wybierasz zadanie, robisz pełną sesję pracy, potem krótką przerwę. Obserwuj: licznik zadania rośnie z 2/4 do 3/4, a w dzienniku pojawiają się zdarzenia Rozpoczęta i Ukończona. Przy pierwszym Start przeglądarka pyta o zgodę.',
+    steps: [go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Zezwól na powiadomienia', () => dispatch({ type: 'PERMISSION_ANSWER', granted: true })),
+            go('Przeskocz 25 min', () => advance(25 * MIN)),
+            go('Kliknij Krótka przerwa (5)', () => dispatch({ type: 'START', kind: 'shortBreak' })),
+            go('Przeskocz 5 min', () => advance(5 * MIN))] },
+  { title: 'Pauza zamraża czas',
+    desc: 'Pauza w połowie sesji, potem 30 minut przerwy. Obserwuj: „Pozostało” stoi w miejscu podczas pauzy, a po wznowieniu sesja kończy się 15 minut później i nadal zalicza Pomodoro.',
+    steps: [go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 10 min', () => advance(10 * MIN)),
+            go('⏸ Pauza', () => dispatch({ type: 'PAUSE' })),
+            go('Przeskocz 30 min (nic nie powinno się zmienić)', () => advance(30 * MIN)),
+            go('▶ Wznów', () => dispatch({ type: 'RESUME' })),
+            go('Przeskocz 10 min (zostaje 5:00)', () => advance(10 * MIN)),
+            go('Przeskocz 5 min (Ukończona)', () => advance(5 * MIN))] },
+  { title: 'Przełączenie w trakcie',
+    desc: 'Po 20 minutach pracy klikasz Krótka przerwa. Obserwuj: aplikacja prosi o potwierdzenie, a po nim sesja pracy jest Porzucona (20 min, licznik bez zmian) i od razu startuje przerwa.',
+    steps: [go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 20 min', () => advance(20 * MIN)),
+            go('Kliknij Krótka przerwa (5)', () => dispatch({ type: 'START', kind: 'shortBreak' })),
+            go('Potwierdź', () => confirmPending())] },
+  { title: 'Zamknięcie aplikacji',
+    desc: 'Zamykasz aplikację 5 minut po starcie i wracasz po 40 minutach. Obserwuj: sesja jest Ukończona z godziną planowanego końca (9:25), Pomodoro się zalicza, ale nie ma dźwięku ani powiadomienia.',
+    steps: [go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 5 min', () => advance(5 * MIN)),
+            go('Zamknij aplikację', () => dispatch({ type: 'CLOSE_APP' })),
+            go('Przeskocz 40 min', () => advance(40 * MIN)),
+            go('Otwórz ponownie', () => dispatch({ type: 'REOPEN' }))] },
+  { title: 'Zamknięcie w trakcie pauzy',
+    desc: 'Pauzujesz, zamykasz aplikację i wracasz po godzinie. Obserwuj: sesja nadal jest zapauzowana z 15:00 do końca. Czy tego oczekujesz, czy po godzinie pauzy sesja powinna przepaść?',
+    steps: [go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 10 min', () => advance(10 * MIN)),
+            go('⏸ Pauza', () => dispatch({ type: 'PAUSE' })),
+            go('Zamknij aplikację', () => dispatch({ type: 'CLOSE_APP' })),
+            go('Przeskocz 60 min', () => advance(60 * MIN)),
+            go('Otwórz ponownie', () => dispatch({ type: 'REOPEN' }))] },
+  { title: 'Rzeczy niedozwolone',
+    desc: 'Próbujesz rzeczy, które nie powinny się udać. Obserwuj komunikaty ✗ i prośby o potwierdzenie.',
+    steps: [go('Kliknij Praca bez wybranego zadania', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Spróbuj wybrać „Maile” w trakcie pracy', () => dispatch({ type: 'SELECT_TASK', id: M })),
+            go('Oznacz „Raport kwartalny” jako Done', () => dispatch({ type: 'MARK_DONE', id: R })),
+            go('Potwierdź (sesja porzucona, Active Task wyczyszczony)', () => confirmPending()),
+            go('Kliknij Praca — znów brak zadania', () => dispatch({ type: 'START', kind: 'work' }))] },
+  { title: 'Odmowa powiadomień',
+    desc: 'Odmawiasz zgody na powiadomienia, a potem wyciszasz dźwięk. Obserwuj: po pierwszej sesji jest tylko dźwięk i komunikat, po drugiej tylko komunikat, a przełącznik 🖥️ nie daje się włączyć.',
+    steps: [go('Kliknij Krótka przerwa (5)', () => dispatch({ type: 'START', kind: 'shortBreak' })),
+            go('Odmów zgody', () => dispatch({ type: 'PERMISSION_ANSWER', granted: false })),
+            go('Przeskocz 5 min', () => advance(5 * MIN)),
+            go('Spróbuj włączyć 🖥️ Powiadomienia', () => dispatch({ type: 'TOGGLE_NOTIFICATIONS' })),
+            go('Wycisz 🔔 Dźwięk', () => dispatch({ type: 'TOGGLE_SOUND' })),
+            go('Kliknij Krótka przerwa (5)', () => dispatch({ type: 'START', kind: 'shortBreak' })),
+            go('Przeskocz 5 min', () => advance(5 * MIN))] },
+  { title: 'Wyczyść w trakcie sesji',
+    desc: 'Czyścisz dziennik w trakcie sesji pracy. Obserwuj: tabela robi się pusta, licznik zadania się nie zmienia, a zakończenie sesji pojawia się jako pierwsze zdarzenie. Uwaga: brakuje wtedy zdarzenia „Rozpoczęta”. Czy to OK?',
+    steps: [go('Wybierz „Raport kwartalny”', () => dispatch({ type: 'SELECT_TASK', id: R })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 10 min', () => advance(10 * MIN)),
+            go('Kliknij Wyczyść', () => dispatch({ type: 'CLEAR_LOG' })),
+            go('Potwierdź', () => confirmPending()),
+            go('Przeskocz 15 min', () => advance(15 * MIN))] },
+  { title: 'Przekroczenie Estimate',
+    desc: '„Maile” mają Estimate 1. Robisz dwa Pomodoro. Obserwuj: licznik 2/1 robi się czerwony, ale praca nie jest blokowana.',
+    steps: [go('Wybierz „Maile”', () => dispatch({ type: 'SELECT_TASK', id: M })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 25 min', () => advance(25 * MIN)),
+            go('Kliknij Praca (25) ponownie', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 25 min', () => advance(25 * MIN))] },
+  { title: 'Następny dzień',
+    desc: 'Robisz sesję, a potem przeskakujesz o dzień. Obserwuj: tabela „dziś” jest pusta, ale zdarzenia nadal są w pamięci (licznik pod tabelą).',
+    steps: [go('Wybierz „Maile”', () => dispatch({ type: 'SELECT_TASK', id: M })),
+            go('Kliknij Praca (25)', () => dispatch({ type: 'START', kind: 'work' })),
+            go('Przeskocz 25 min', () => advance(25 * MIN)),
+            go('Przeskocz 1 dzień', () => advance(DAY))] },
+];
+
+function startScenario(i) { scenario = i; stepIndex = 0; seed(); render(); }
+function runStep(i) { if (i !== stepIndex) return; stepIndex++; SCENARIOS[scenario].steps[i].fn(); }
+
+function renderWalkthroughs() {
+  const sc = SCENARIOS[scenario];
+  document.getElementById('walkCard').innerHTML = `
+    <h2>Scenariusze</h2>
+    <div class="tabs">${SCENARIOS.map((s, i) => `<button class="${i === scenario ? 'on' : ''}" onclick="startScenario(${i})">${s.title}</button>`).join('')}</div>
+    ${sc ? `<p>${sc.desc}</p><div class="steps">${sc.steps.map((st, i) =>
+        `<button class="${i < stepIndex ? 'done' : i === stepIndex ? 'next' : ''}" ${i === stepIndex ? '' : 'disabled'} onclick="runStep(${i})">${i < stepIndex ? '✓' : i + 1 + '.'} ${st.label}</button>`).join('')}</div>
+        ${stepIndex === sc.steps.length ? '<p class="muted">Koniec scenariusza. Kliknij zakładkę, żeby zacząć od nowa.</p>' : ''}`
+      : '<p class="muted">Wybierz zakładkę. Każdy scenariusz zaczyna od tego samego stanu: „Raport kwartalny” 2/4 i „Maile” 0/1, godzina 9:00.</p>'}`;
+}
+
+seed();
+render();
+</script>
+</body>
+</html>
