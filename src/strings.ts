@@ -7,7 +7,12 @@ export const strings = {
 	},
 	tasks: {
 		heading: 'Zadania',
-		placeholder: 'Tu pojawi się lista zadań.',
+		emptyHint: 'Dodaj zadanie, aby zacząć',
+		invalidName: 'Zadanie musi mieć nazwę.',
+		invalidEstimate: 'Estimate musi być liczbą całkowitą ≥ 1.',
+		nameLabel: 'Nazwa zadania',
+		estimateLabel: 'Estimate',
+		add: 'Dodaj',
 	},
 	eventLog: {
 		heading: 'Dziennik (dziś)',
