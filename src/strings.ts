@@ -3,12 +3,25 @@ export const strings = {
 	appName: 'Pomodorox',
 	timer: {
 		heading: 'Timer',
-		placeholder: 'Tu pojawi się timer z przyciskami Praca, Krótka przerwa i Długa przerwa.',
+		startWork: (minutes: number) => `Praca (${minutes})`,
+		kinds: {
+			work: 'Praca',
+			shortBreak: 'Krótka przerwa',
+			longBreak: 'Długa przerwa',
+		},
+		dismiss: 'Zamknij',
+		noActiveTask: 'Najpierw wybierz zadanie.',
+		sessionRunning: 'Sesja już trwa.',
+		workCompleted: (taskName: string, pomodoroCount: number, estimate: number) =>
+			`Praca zakończona: ${taskName} (${pomodoroCount}/${estimate}). Czas na przerwę.`,
+		breakCompleted: 'Przerwa zakończona. Wracamy do pracy?',
 	},
 	tasks: {
 		heading: 'Zadania',
 		emptyHint: 'Dodaj zadanie, aby zacząć',
 		invalidName: 'Zadanie musi mieć nazwę.',
+		unknownTask: 'Nie ma takiego zadania.',
+		activeTaskLocked: 'W trakcie pracy nie można zmienić zadania.',
 		invalidEstimate: 'Estimate musi być liczbą całkowitą ≥ 1.',
 		nameLabel: 'Nazwa zadania',
 		estimateLabel: 'Estimate',
