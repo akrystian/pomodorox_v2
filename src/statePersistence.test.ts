@@ -62,4 +62,21 @@ describe('state persistence', () => {
 			events: [],
 		});
 	});
+
+	it('round-trips abandoned Events', () => {
+		const storage = memoryStorage();
+		const state: SessionState = {
+			tasks: [task],
+			activeTaskId: task.id,
+			session: null,
+			events: [
+				{ at: 1_761_500_000_000, type: 'started', kind: 'work', taskName: 'Raport kwartalny', durationMs: null },
+				{ at: 1_761_500_720_000, type: 'abandoned', kind: 'work', taskName: 'Raport kwartalny', durationMs: 720_000 },
+			],
+		};
+
+		saveState(state, storage);
+
+		expect(loadState(storage)).toEqual(state);
+	});
 });

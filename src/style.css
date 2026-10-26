@@ -109,6 +109,11 @@ body {
 	line-height: 1.1;
 }
 
+.session-kind {
+	margin: 0;
+	color: var(--muted);
+}
+
 .active-task {
 	margin: 4px 0 12px;
 }
@@ -118,6 +123,29 @@ body {
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-bottom: 8px;
+}
+
+.confirm-dialog {
+	max-width: min(420px, calc(100vw - 32px));
+	padding: 16px;
+	color: var(--ink);
+	background: var(--card);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+}
+
+.confirm-dialog::backdrop {
+	background: rgb(0 0 0 / 0.4);
+}
+
+.confirm-dialog p {
+	margin: 0 0 16px;
+}
+
+.confirm-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
 }
 
 .banner {

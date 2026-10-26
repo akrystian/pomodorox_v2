@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { strings } from './strings';
 import { ReloadPrompt } from './ReloadPrompt';
-import { DURATIONS, reduce, remaining } from './SessionModel';
+import { ConfirmDialog } from './ConfirmDialog';
+import { DURATIONS, SESSION_KINDS, reduce, remaining } from './SessionModel';
 import type { SessionAction, SessionState } from './SessionModel';
 import { loadState, saveState } from './statePersistence';
+
+type StartAction = Extract<SessionAction, { type: 'START' }>;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -18,6 +21,7 @@ export function App() {
 	const stateRef = useRef(state);
 	const [now, setNow] = useState(() => Date.now());
 	const [banner, setBanner] = useState<string | null>(null);
+	const [pending, setPending] = useState<{ action: StartAction; question: string } | null>(null);
 	const [name, setName] = useState('');
 	const [estimate, setEstimate] = useState('1');
 	const [error, setError] = useState<string | null>(null);
@@ -63,11 +67,24 @@ export function App() {
 	const activeTask = state.tasks.find((task) => task.id === state.activeTaskId);
 	const workLocked = session?.kind === 'work';
 
-	const startWork = () => {
+	const start = (action: StartAction) => {
+		setNow(action.at);
+		// Cleared first: this START may complete an elapsed Session and raise a new banner.
 		setBanner(null);
+		const outcome = dispatch(action);
+		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
+	};
+
+	const confirmPending = () => {
+		if (!pending) return;
+		setPending(null);
+		start({ ...pending.action, at: Date.now(), confirmed: true });
+	};
+
+	const stop = () => {
 		const at = Date.now();
 		setNow(at);
-		dispatch({ type: 'START', at, kind: 'work' });
+		dispatch({ type: 'STOP', at });
 	};
 
 	const addTask = (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
@@ -95,6 +112,7 @@ export function App() {
 				<p class="time-left" role="timer">
 					{formatRemaining(timeLeft)}
 				</p>
+				{session && <p class="session-kind">{strings.timer.kinds[session.kind]}</p>}
 				{activeTask && (
 					<p class="active-task">
 						{activeTask.name}{' '}
@@ -104,15 +122,23 @@ export function App() {
 					</p>
 				)}
 				<div class="timer-actions">
-					<button
-						class="primary"
-						type="button"
-						onClick={startWork}
-						disabled={!activeTask || session !== null}
-						aria-describedby={activeTask ? undefined : 'work-hint'}
-					>
-						{strings.timer.startWork(DURATIONS.work / 60_000)}
-					</button>
+					{SESSION_KINDS.map((kind) => (
+						<button
+							key={kind}
+							class={kind === 'work' ? 'primary' : undefined}
+							type="button"
+							onClick={() => start({ type: 'START', at: Date.now(), kind })}
+							disabled={kind === 'work' && !activeTask}
+							aria-describedby={kind === 'work' && !activeTask ? 'work-hint' : undefined}
+						>
+							{strings.timer.sessionButton(strings.timer.kinds[kind], DURATIONS[kind] / 60_000)}
+						</button>
+					))}
+					{session && (
+						<button type="button" onClick={stop}>
+							{strings.timer.stop}
+						</button>
+					)}
 				</div>
 				{!activeTask && (
 					<p id="work-hint" class="placeholder">
@@ -189,6 +215,13 @@ export function App() {
 				<h2 id="log-heading">{strings.eventLog.heading}</h2>
 				<p class="placeholder">{strings.eventLog.placeholder}</p>
 			</section>
+			{pending && (
+				<ConfirmDialog
+					question={pending.question}
+					onConfirm={confirmPending}
+					onCancel={() => setPending(null)}
+				/>
+			)}
 			<ReloadPrompt />
 		</main>
 	);

@@ -1,4 +1,4 @@
-import { DURATIONS, initialState } from './SessionModel';
+import { EVENT_TYPES, SESSION_KINDS, initialState } from './SessionModel';
 import type { Session, SessionEvent, SessionState, Task } from './SessionModel';
 
 export const STORAGE_KEY = 'pomodorox.session';
@@ -9,7 +9,7 @@ type StorageAdapter = Pick<Storage, 'getItem' | 'setItem'>;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
 
-const isKind = (value: unknown) => typeof value === 'string' && Object.hasOwn(DURATIONS, value);
+const isKind = (value: unknown) => SESSION_KINDS.some((kind) => kind === value);
 
 const isNullableString = (value: unknown) => value === null || typeof value === 'string';
 
@@ -45,7 +45,7 @@ function isEvent(value: unknown): value is SessionEvent {
 	return (
 		isRecord(value) &&
 		typeof value.at === 'number' &&
-		(value.type === 'started' || value.type === 'completed') &&
+		EVENT_TYPES.some((type) => type === value.type) &&
 		isKind(value.kind) &&
 		isNullableString(value.taskName) &&
 		isNullableNumber(value.durationMs)
