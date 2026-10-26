@@ -69,8 +69,9 @@ export function App() {
 
 	const start = (action: StartAction) => {
 		setNow(action.at);
+		// Cleared first: this START may complete an elapsed Session and raise a new banner.
+		setBanner(null);
 		const outcome = dispatch(action);
-		if (outcome.type === 'ok') setBanner(null);
 		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
 	};
 

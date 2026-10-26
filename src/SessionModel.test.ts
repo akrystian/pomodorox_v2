@@ -111,6 +111,11 @@ const withTasks = () => {
 	return state;
 };
 
+const runningWork = () => {
+	const state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
+	return reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+};
+
 describe('Active Task', () => {
 	it('selecting a Task makes it the Active Task', () => {
 		const result = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: MAIL_ID });
@@ -163,8 +168,7 @@ describe('Work Session', () => {
 	});
 
 	it('locks the Active Task while Work is running', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+		const state = runningWork();
 
 		const result = reduce(state, { type: 'SELECT_TASK', at: T0 + MIN, id: MAIL_ID });
 
@@ -176,8 +180,7 @@ describe('Work Session', () => {
 	});
 
 	it('leaves a Session running while it still has time left', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+		const state = runningWork();
 
 		const result = reduce(state, { type: 'TICK', at: T0 + 25 * MIN - 1 });
 
@@ -185,8 +188,7 @@ describe('Work Session', () => {
 	});
 
 	it('completes Work at its scheduled end, counts a Pomodoro and keeps the Active Task', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+		const state = runningWork();
 
 		// A throttled background tab ticks late; the Session still ends at T0 + 25 min.
 		const result = reduce(state, { type: 'TICK', at: T0 + 25 * MIN + 7_000 });
@@ -203,19 +205,6 @@ describe('Work Session', () => {
 			{ type: 'persist' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
-	});
-
-	it('asks for confirmation before starting a Session while one is running', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
-
-		const result = reduce(state, { type: 'START', at: T0 + MIN, kind: 'shortBreak' });
-
-		expect(result).toEqual({
-			state,
-			outcome: { type: 'confirm', question: 'Porzucić bieżącą sesję?' },
-			effects: [],
-		});
 	});
 });
 
@@ -256,8 +245,7 @@ describe('Breaks', () => {
 
 describe('Stop', () => {
 	it('abandons the running Session with its run time and leaves the Pomodoro Count alone', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+		const state = runningWork();
 
 		const result = reduce(state, { type: 'STOP', at: T0 + 12 * MIN });
 
@@ -275,9 +263,44 @@ describe('Stop', () => {
 		expect(result.effects).toEqual([{ type: 'persist' }]);
 	});
 
+	it('completes a Session whose time already ran out instead of abandoning it', () => {
+		const state = runningWork();
+
+		// No TICK reached the reducer between the scheduled end and the Stop.
+		const result = reduce(state, { type: 'STOP', at: T0 + 25 * MIN + 30_000 });
+
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state.session).toBeNull();
+		expect(result.state.tasks.find((task) => task.id === REPORT_ID)?.pomodoroCount).toBe(1);
+		expect(result.state.events.at(-1)).toEqual({
+			at: T0 + 25 * MIN,
+			type: 'completed',
+			kind: 'work',
+			taskName: 'Raport kwartalny',
+			durationMs: 25 * MIN,
+		});
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
+		]);
+	});
+});
+
+describe('Switching Sessions', () => {
+	it('asks for confirmation before starting a Session while one is running', () => {
+		const state = runningWork();
+
+		const result = reduce(state, { type: 'START', at: T0 + MIN, kind: 'shortBreak' });
+
+		expect(result).toEqual({
+			state,
+			outcome: { type: 'confirm', question: 'Porzucić bieżącą sesję?' },
+			effects: [],
+		});
+	});
+
 	it('on confirmation abandons the running Session and starts the new one', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+		const state = runningWork();
 
 		const result = reduce(state, { type: 'START', at: T0 + 20 * MIN, kind: 'longBreak', confirmed: true });
 
@@ -309,32 +332,8 @@ describe('Stop', () => {
 		});
 	});
 
-	it('completes a Session whose time already ran out instead of abandoning it', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
-
-		// No TICK reached the reducer between the scheduled end and the Stop.
-		const result = reduce(state, { type: 'STOP', at: T0 + 25 * MIN + 30_000 });
-
-		expect(result.outcome).toEqual({ type: 'ok' });
-		expect(result.state.session).toBeNull();
-		expect(result.state.tasks.find((task) => task.id === REPORT_ID)?.pomodoroCount).toBe(1);
-		expect(result.state.events.at(-1)).toEqual({
-			at: T0 + 25 * MIN,
-			type: 'completed',
-			kind: 'work',
-			taskName: 'Raport kwartalny',
-			durationMs: 25 * MIN,
-		});
-		expect(result.effects).toEqual([
-			{ type: 'persist' },
-			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
-		]);
-	});
-
 	it('starts straight away, completing the previous Session, when its time already ran out', () => {
-		let state = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
-		state = reduce(state, { type: 'START', at: T0, kind: 'work' }).state;
+		const state = runningWork();
 
 		const result = reduce(state, { type: 'START', at: T0 + 25 * MIN + 30_000, kind: 'shortBreak' });
 
