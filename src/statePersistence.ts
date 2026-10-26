@@ -1,34 +1,74 @@
-import { initialState } from './SessionModel';
-import type { SessionState, Task } from './SessionModel';
+import { DURATIONS, initialState } from './SessionModel';
+import type { Session, SessionEvent, SessionState, Task } from './SessionModel';
 
 export const STORAGE_KEY = 'pomodorox.session';
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 type StorageAdapter = Pick<Storage, 'getItem' | 'setItem'>;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null;
+
+const isKind = (value: unknown) => typeof value === 'string' && Object.hasOwn(DURATIONS, value);
+
+const isNullableString = (value: unknown) => value === null || typeof value === 'string';
+
+const isNullableNumber = (value: unknown) => value === null || typeof value === 'number';
+
 function isTask(value: unknown): value is Task {
-	if (typeof value !== 'object' || value === null) return false;
-	const task = value as Record<string, unknown>;
 	return (
-		typeof task.id === 'string' &&
-		typeof task.name === 'string' &&
-		task.name.trim().length > 0 &&
-		typeof task.estimate === 'number' &&
-		Number.isInteger(task.estimate) &&
-		task.estimate >= 1 &&
-		typeof task.pomodoroCount === 'number' &&
-		Number.isInteger(task.pomodoroCount) &&
-		task.pomodoroCount >= 0
+		isRecord(value) &&
+		typeof value.id === 'string' &&
+		typeof value.name === 'string' &&
+		value.name.trim().length > 0 &&
+		typeof value.estimate === 'number' &&
+		Number.isInteger(value.estimate) &&
+		value.estimate >= 1 &&
+		typeof value.pomodoroCount === 'number' &&
+		Number.isInteger(value.pomodoroCount) &&
+		value.pomodoroCount >= 0
+	);
+}
+
+function isSession(value: unknown): value is Session {
+	return (
+		isRecord(value) &&
+		isKind(value.kind) &&
+		isNullableString(value.taskId) &&
+		typeof value.startedAt === 'number' &&
+		isNullableNumber(value.pausedAt) &&
+		typeof value.pausedTotal === 'number'
+	);
+}
+
+function isEvent(value: unknown): value is SessionEvent {
+	return (
+		isRecord(value) &&
+		typeof value.at === 'number' &&
+		(value.type === 'started' || value.type === 'completed') &&
+		isKind(value.kind) &&
+		isNullableString(value.taskName) &&
+		isNullableNumber(value.durationMs)
 	);
 }
 
 function isSessionState(value: unknown): value is SessionState {
 	return (
-		typeof value === 'object' &&
-		value !== null &&
-		Array.isArray((value as { tasks?: unknown }).tasks) &&
-		(value as { tasks: unknown[] }).tasks.every(isTask)
+		isRecord(value) &&
+		Array.isArray(value.tasks) &&
+		value.tasks.every(isTask) &&
+		isNullableString(value.activeTaskId) &&
+		(value.session === null || isSession(value.session)) &&
+		Array.isArray(value.events) &&
+		value.events.every(isEvent)
 	);
+}
+
+// Version 1 stored only Tasks.
+function migrate(schemaVersion: unknown, state: unknown): unknown {
+	if (schemaVersion === 1 && isRecord(state)) return { ...initialState(), tasks: state.tasks };
+	if (schemaVersion === SCHEMA_VERSION) return state;
+	return null;
 }
 
 export function saveState(state: SessionState, storage: StorageAdapter = localStorage): void {
@@ -41,14 +81,9 @@ export function loadState(storage: StorageAdapter = localStorage): SessionState 
 
 	try {
 		const value: unknown = JSON.parse(serialized);
-		if (
-			typeof value === 'object' &&
-			value !== null &&
-			(value as { schemaVersion?: unknown }).schemaVersion === SCHEMA_VERSION &&
-			isSessionState((value as { state?: unknown }).state)
-		) {
-			return (value as { state: SessionState }).state;
-		}
+		if (!isRecord(value)) return initialState();
+		const state = migrate(value.schemaVersion, value.state);
+		if (isSessionState(state)) return state;
 	} catch {
 		return initialState();
 	}

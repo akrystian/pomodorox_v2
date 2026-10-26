@@ -75,9 +75,21 @@ body {
 	display: flex;
 	align-items: center;
 	gap: 8px;
+	width: 100%;
 	padding: 8px;
+	text-align: left;
 	border: 1px solid var(--line);
 	border-radius: 8px;
+}
+
+.task.active {
+	border-color: var(--accent);
+	box-shadow: inset 4px 0 0 var(--accent);
+}
+
+.task:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
 }
 
 .task > span:first-child {
@@ -87,6 +99,40 @@ body {
 .task-count {
 	font-variant-numeric: tabular-nums;
 	font-weight: 600;
+}
+
+.time-left {
+	margin: 0;
+	font-size: 56px;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	line-height: 1.1;
+}
+
+.active-task {
+	margin: 4px 0 12px;
+}
+
+.timer-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.banner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-top: 12px;
+	padding: 8px 12px;
+	border: 1px solid var(--accent);
+	border-radius: 8px;
+}
+
+.banner span {
+	flex: 1;
 }
 
 .task-form {
@@ -163,4 +209,9 @@ button.primary {
 	background: var(--accent);
 	border-color: var(--accent);
 	color: #fff;
+}
+
+button.primary:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
 }
