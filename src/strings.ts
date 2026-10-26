@@ -3,7 +3,7 @@ export const strings = {
 	appName: 'Pomodorox',
 	timer: {
 		heading: 'Timer',
-		startWork: 'Praca (25)',
+		startWork: (minutes: number) => `Praca (${minutes})`,
 		kinds: {
 			work: 'Praca',
 			shortBreak: 'Krótka przerwa',

@@ -111,7 +111,7 @@ export function App() {
 						disabled={!activeTask || session !== null}
 						aria-describedby={activeTask ? undefined : 'work-hint'}
 					>
-						{strings.timer.startWork}
+						{strings.timer.startWork(DURATIONS.work / 60_000)}
 					</button>
 				</div>
 				{!activeTask && (
