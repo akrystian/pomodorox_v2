@@ -1,3 +1,5 @@
+import { strings } from './strings';
+
 export type Task = {
 	id: string;
 	name: string;
@@ -26,10 +28,28 @@ export type ReduceResult = {
 export const initialState = (): SessionState => ({ tasks: [] });
 
 export function reduce(state: SessionState, action: SessionAction): ReduceResult {
+	const name = action.name.trim();
+	if (!name) {
+		return {
+			state,
+			outcome: { type: 'rejected', reason: strings.tasks.invalidName },
+			effects: [],
+		};
+	}
+
+	const estimate = Number(action.estimate ?? 1);
+	if (!Number.isInteger(estimate) || estimate < 1) {
+		return {
+			state,
+			outcome: { type: 'rejected', reason: strings.tasks.invalidEstimate },
+			effects: [],
+		};
+	}
+
 	const task: Task = {
 		id: action.id,
-		name: action.name.trim(),
-		estimate: Number(action.estimate ?? 1),
+		name,
+		estimate,
 		pomodoroCount: 0,
 	};
 	return {
