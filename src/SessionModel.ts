@@ -1,6 +1,8 @@
 import { strings } from './strings';
 
-export type SessionKind = 'work' | 'shortBreak' | 'longBreak';
+export const SESSION_KINDS = ['work', 'shortBreak', 'longBreak'] as const;
+
+export type SessionKind = (typeof SESSION_KINDS)[number];
 
 const MIN = 60_000;
 
@@ -28,12 +30,14 @@ export type Session = {
 	pausedTotal: number;
 };
 
+export const EVENT_TYPES = ['started', 'completed', 'abandoned'] as const;
+
 export type SessionEvent = {
 	at: number;
-	type: 'started' | 'completed';
+	type: (typeof EVENT_TYPES)[number];
 	kind: SessionKind;
 	taskName: string | null;
-	/** Only for completed (and later abandoned) Events. */
+	/** Only for completed and abandoned Events. */
 	durationMs: number | null;
 };
 
@@ -53,14 +57,20 @@ export type SessionAction =
 			estimate?: number | string;
 	  }
 	| { type: 'SELECT_TASK'; at: number; id: string }
-	| { type: 'START'; at: number; kind: SessionKind }
+	| { type: 'START'; at: number; kind: SessionKind; confirmed?: boolean }
+	| { type: 'STOP'; at: number }
 	| { type: 'TICK'; at: number };
 
 export type ReduceResult = {
 	state: SessionState;
-	outcome: { type: 'ok' } | { type: 'rejected'; reason: string };
+	outcome: Outcome;
 	effects: Effect[];
 };
+
+export type Outcome =
+	| { type: 'ok' }
+	| { type: 'rejected'; reason: string }
+	| { type: 'confirm'; question: string };
 
 export type Effect = { type: 'persist' } | { type: 'banner'; text: string };
 
@@ -103,7 +113,19 @@ const logEvent = (
 	],
 });
 
-function complete(state: SessionState & { session: Session }, at: number): ReduceResult {
+type Settled = { state: SessionState; effects: Effect[] };
+
+// A Session whose time ran out is Completed at its scheduledEnd, whichever action
+// reaches the reducer first, so a late TICK, STOP or START never abandons it.
+function completeIfElapsed(state: SessionState, at: number): Settled {
+	const { session } = state;
+	if (!session || session.pausedAt !== null || remaining(session, at) > 0) {
+		return { state, effects: [] };
+	}
+	return complete({ ...state, session }, scheduledEnd(session));
+}
+
+function complete(state: SessionState & { session: Session }, at: number): Settled {
 	const { kind, taskId } = state.session;
 	let next = logEvent(state, at, 'completed', DURATIONS[kind]);
 	if (kind === 'work') {
@@ -118,8 +140,19 @@ function complete(state: SessionState & { session: Session }, at: number): Reduc
 	const text = task
 		? strings.timer.workCompleted(task.name, task.pomodoroCount, task.estimate)
 		: strings.timer.breakCompleted;
-	return ok({ ...next, session: null }, [{ type: 'banner', text }]);
+	return { state: { ...next, session: null }, effects: [{ type: 'banner', text }] };
 }
+
+const abandon = (state: SessionState & { session: Session }, at: number): SessionState => ({
+	...logEvent(state, at, 'abandoned', runTime(state.session, at)),
+	session: null,
+});
+
+const needConfirm = (state: SessionState, question: string): ReduceResult => ({
+	state,
+	outcome: { type: 'confirm', question },
+	effects: [],
+});
 
 const reject = (state: SessionState, reason: string): ReduceResult => ({
 	state,
@@ -157,27 +190,38 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 			return ok({ ...state, activeTaskId: action.id });
 
 		case 'START': {
-			// Switching Sessions with confirmation comes later; until then one at a time.
-			if (state.session) return reject(state, strings.timer.sessionRunning);
 			if (action.kind === 'work' && state.activeTaskId === null) {
 				return reject(state, strings.timer.noActiveTask);
 			}
+			const settled = completeIfElapsed(state, action.at);
+			if (settled.state.session && !action.confirmed) {
+				return needConfirm(state, strings.timer.confirmAbandon);
+			}
+			const current = settled.state.session
+				? abandon({ ...settled.state, session: settled.state.session }, action.at)
+				: settled.state;
 			const session: Session = {
 				kind: action.kind,
-				taskId: action.kind === 'work' ? state.activeTaskId : null,
+				taskId: action.kind === 'work' ? current.activeTaskId : null,
 				startedAt: action.at,
 				pausedAt: null,
 				pausedTotal: 0,
 			};
-			return ok(logEvent({ ...state, session }, action.at, 'started'));
+			return ok(logEvent({ ...current, session }, action.at, 'started'), settled.effects);
+		}
+
+		case 'STOP': {
+			const settled = completeIfElapsed(state, action.at);
+			if (settled.state !== state) return ok(settled.state, settled.effects);
+			const { session } = state;
+			if (!session) return reject(state, strings.timer.noSession);
+			return ok(abandon({ ...state, session }, action.at));
 		}
 
 		case 'TICK': {
-			const { session } = state;
-			if (!session || session.pausedAt !== null || remaining(session, action.at) > 0) {
-				return { state, outcome: { type: 'ok' }, effects: [] };
-			}
-			return complete({ ...state, session }, scheduledEnd(session));
+			const settled = completeIfElapsed(state, action.at);
+			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
+			return ok(settled.state, settled.effects);
 		}
 	}
 }

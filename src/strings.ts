@@ -3,7 +3,8 @@ export const strings = {
 	appName: 'Pomodorox',
 	timer: {
 		heading: 'Timer',
-		startWork: (minutes: number) => `Praca (${minutes})`,
+		sessionButton: (kind: string, minutes: number) => `${kind} (${minutes})`,
+		stop: 'Stop',
 		kinds: {
 			work: 'Praca',
 			shortBreak: 'Krótka przerwa',
@@ -11,7 +12,8 @@ export const strings = {
 		},
 		dismiss: 'Zamknij',
 		noActiveTask: 'Najpierw wybierz zadanie.',
-		sessionRunning: 'Sesja już trwa.',
+		confirmAbandon: 'Porzucić bieżącą sesję?',
+		noSession: 'Nie ma sesji do zatrzymania.',
 		workCompleted: (taskName: string, pomodoroCount: number, estimate: number) =>
 			`Praca zakończona: ${taskName} (${pomodoroCount}/${estimate}). Czas na przerwę.`,
 		breakCompleted: 'Przerwa zakończona. Wracamy do pracy?',
@@ -30,6 +32,10 @@ export const strings = {
 	eventLog: {
 		heading: 'Dziennik (dziś)',
 		placeholder: 'Tu pojawią się dzisiejsze zdarzenia.',
+	},
+	confirm: {
+		yes: 'Tak',
+		cancel: 'Anuluj',
 	},
 	pwa: {
 		offlineReady: 'Aplikacja jest gotowa do pracy offline.',
