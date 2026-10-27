@@ -30,7 +30,7 @@ export type Session = {
 	pausedTotal: number;
 };
 
-export const EVENT_TYPES = ['started', 'completed', 'abandoned'] as const;
+export const EVENT_TYPES = ['started', 'completed', 'abandoned', 'paused', 'resumed'] as const;
 
 export type SessionEvent = {
 	at: number;
@@ -59,6 +59,8 @@ export type SessionAction =
 	| { type: 'SELECT_TASK'; at: number; id: string }
 	| { type: 'START'; at: number; kind: SessionKind; confirmed?: boolean }
 	| { type: 'STOP'; at: number }
+	| { type: 'PAUSE'; at: number }
+	| { type: 'RESUME'; at: number }
 	| { type: 'TICK'; at: number };
 
 export type ReduceResult = {
@@ -216,6 +218,27 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 			const { session } = state;
 			if (!session) return reject(state, strings.timer.noSession);
 			return ok(abandon({ ...state, session }, action.at));
+		}
+
+		case 'PAUSE': {
+			const settled = completeIfElapsed(state, action.at);
+			if (settled.state !== state) return ok(settled.state, settled.effects);
+			const { session } = state;
+			if (!session) return reject(state, strings.timer.noSession);
+			if (session.pausedAt !== null) return reject(state, strings.timer.alreadyPaused);
+			return ok(logEvent({ ...state, session: { ...session, pausedAt: action.at } }, action.at, 'paused'));
+		}
+
+		case 'RESUME': {
+			const { session } = state;
+			if (!session) return reject(state, strings.timer.noSession);
+			if (session.pausedAt === null) return reject(state, strings.timer.notPaused);
+			const resumed: Session = {
+				...session,
+				pausedAt: null,
+				pausedTotal: session.pausedTotal + (action.at - session.pausedAt),
+			};
+			return ok(logEvent({ ...state, session: resumed }, action.at, 'resumed'));
 		}
 
 		case 'TICK': {

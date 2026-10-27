@@ -5,6 +5,11 @@ export const strings = {
 		heading: 'Timer',
 		sessionButton: (kind: string, minutes: number) => `${kind} (${minutes})`,
 		stop: 'Stop',
+		pause: 'Pauza',
+		resume: 'Wznów',
+		paused: 'Wstrzymano',
+		alreadyPaused: 'Sesja jest już wstrzymana.',
+		notPaused: 'Sesja nie jest wstrzymana.',
 		kinds: {
 			work: 'Praca',
 			shortBreak: 'Krótka przerwa',

@@ -87,6 +87,12 @@ export function App() {
 		dispatch({ type: 'STOP', at });
 	};
 
+	const togglePause = () => {
+		const at = Date.now();
+		setNow(at);
+		dispatch({ type: session?.pausedAt === null ? 'PAUSE' : 'RESUME', at });
+	};
+
 	const addTask = (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
 		event.preventDefault();
 		const outcome = dispatch({
@@ -112,7 +118,12 @@ export function App() {
 				<p class="time-left" role="timer">
 					{formatRemaining(timeLeft)}
 				</p>
-				{session && <p class="session-kind">{strings.timer.kinds[session.kind]}</p>}
+				{session && (
+					<p class="session-kind">
+						{strings.timer.kinds[session.kind]}
+						{session.pausedAt !== null && ` · ${strings.timer.paused}`}
+					</p>
+				)}
 				{activeTask && (
 					<p class="active-task">
 						{activeTask.name}{' '}
@@ -134,6 +145,11 @@ export function App() {
 							{strings.timer.sessionButton(strings.timer.kinds[kind], DURATIONS[kind] / 60_000)}
 						</button>
 					))}
+					{session && (
+						<button type="button" onClick={togglePause}>
+							{session.pausedAt === null ? strings.timer.pause : strings.timer.resume}
+						</button>
+					)}
 					{session && (
 						<button type="button" onClick={stop}>
 							{strings.timer.stop}

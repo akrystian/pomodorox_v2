@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialState, reduce } from './SessionModel';
+import { initialState, reduce, remaining } from './SessionModel';
 
 describe('SessionModel', () => {
 	it('adds a named Task with its Estimate at the bottom of the list', () => {
@@ -347,5 +347,65 @@ describe('Switching Sessions', () => {
 			{ type: 'persist' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
+	});
+});
+
+describe('Pause and Resume', () => {
+	it('freezes the time left however much time passes', () => {
+		const paused = reduce(runningWork(), { type: 'PAUSE', at: T0 + 10 * MIN });
+
+		expect(paused.outcome).toEqual({ type: 'ok' });
+		expect(paused.effects).toEqual([{ type: 'persist' }]);
+		expect(paused.state.events.at(-1)).toEqual({
+			at: T0 + 10 * MIN,
+			type: 'paused',
+			kind: 'work',
+			taskName: 'Raport kwartalny',
+			durationMs: null,
+		});
+		const ticked = reduce(paused.state, { type: 'TICK', at: T0 + 10 * MIN + 100 * MIN });
+		expect(ticked.state).toBe(paused.state);
+		expect(remaining(paused.state.session!, T0 + 500 * MIN)).toBe(15 * MIN);
+	});
+
+	it('completes at the original duration plus the paused time and counts the Pomodoro', () => {
+		let state = reduce(runningWork(), { type: 'PAUSE', at: T0 + 10 * MIN }).state;
+		const resumed = reduce(state, { type: 'RESUME', at: T0 + 40 * MIN });
+		state = resumed.state;
+
+		expect(resumed.outcome).toEqual({ type: 'ok' });
+		expect(state.events.at(-1)).toMatchObject({ at: T0 + 40 * MIN, type: 'resumed', durationMs: null });
+		expect(reduce(state, { type: 'TICK', at: T0 + 55 * MIN - 1 }).state).toBe(state);
+
+		const done = reduce(state, { type: 'TICK', at: T0 + 55 * MIN });
+		expect(done.state.session).toBeNull();
+		expect(done.state.tasks.find((task) => task.id === REPORT_ID)?.pomodoroCount).toBe(1);
+		expect(done.state.events.at(-1)).toMatchObject({ at: T0 + 55 * MIN, type: 'completed', durationMs: 25 * MIN });
+	});
+
+	it('rejects Pause when already paused or no Session, and Resume when not paused', () => {
+		const running = runningWork();
+		const paused = reduce(running, { type: 'PAUSE', at: T0 + MIN }).state;
+
+		for (const [state, type] of [
+			[paused, 'PAUSE'],
+			[running, 'RESUME'],
+			[initialState(), 'PAUSE'],
+			[initialState(), 'RESUME'],
+		] as const) {
+			const result = reduce(state, { type, at: T0 + 2 * MIN });
+			expect(result.outcome.type).toBe('rejected');
+			expect(result.state).toBe(state);
+			expect(result.effects).toEqual([]);
+		}
+	});
+
+	it('abandons a paused Session with the run time before the pause', () => {
+		const paused = reduce(runningWork(), { type: 'PAUSE', at: T0 + 10 * MIN }).state;
+
+		const result = reduce(paused, { type: 'STOP', at: T0 + 90 * MIN });
+
+		expect(result.state.session).toBeNull();
+		expect(result.state.events.at(-1)).toMatchObject({ type: 'abandoned', durationMs: 10 * MIN });
 	});
 });
