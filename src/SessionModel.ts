@@ -61,7 +61,8 @@ export type SessionAction =
 	| { type: 'STOP'; at: number }
 	| { type: 'PAUSE'; at: number }
 	| { type: 'RESUME'; at: number }
-	| { type: 'TICK'; at: number };
+	| { type: 'TICK'; at: number }
+	| { type: 'REOPEN'; at: number };
 
 export type ReduceResult = {
 	state: SessionState;
@@ -239,6 +240,15 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 				pausedTotal: session.pausedTotal + (action.at - session.pausedAt),
 			};
 			return ok(logEvent({ ...state, session: resumed }, action.at, 'resumed'));
+		}
+
+		case 'REOPEN': {
+			const settled = completeIfElapsed(state, action.at);
+			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
+			const effects = settled.effects.map((effect) =>
+				effect.type === 'banner' ? { ...effect, text: strings.timer.endedWhileClosed(effect.text) } : effect,
+			);
+			return ok(settled.state, effects);
 		}
 
 		case 'TICK': {

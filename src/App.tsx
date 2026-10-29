@@ -37,6 +37,13 @@ export function App() {
 		return result.outcome;
 	};
 
+	// On startup, settle a Session whose time ran out while the app was closed.
+	useEffect(() => {
+		const at = Date.now();
+		setNow(at);
+		dispatch({ type: 'REOPEN', at });
+	}, []);
+
 	// Clock driver: ticks about once a second while a Session runs, and as soon as
 	// the tab becomes visible again so a throttled background tab catches up.
 	const { session } = state;
@@ -161,6 +168,7 @@ export function App() {
 						{strings.timer.noActiveTask}
 					</p>
 				)}
+				<p class="placeholder">{strings.timer.keepOpenNote}</p>
 				{banner && (
 					<div class="banner" role="status">
 						<span>{banner}</span>

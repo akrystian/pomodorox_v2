@@ -409,3 +409,41 @@ describe('Pause and Resume', () => {
 		expect(result.state.events.at(-1)).toMatchObject({ type: 'abandoned', durationMs: 10 * MIN });
 	});
 });
+
+describe('Reopen', () => {
+	it('lets a Session with time left continue', () => {
+		const state = runningWork();
+
+		const result = reduce(state, { type: 'REOPEN', at: T0 + 10 * MIN });
+
+		expect(result).toEqual({ state, outcome: { type: 'ok' }, effects: [] });
+	});
+
+	it('completes an elapsed Session at its scheduled end with only an in-app message', () => {
+		const result = reduce(runningWork(), { type: 'REOPEN', at: T0 + 90 * MIN });
+
+		expect(result.state.session).toBeNull();
+		expect(result.state.tasks.find((task) => task.id === REPORT_ID)?.pomodoroCount).toBe(1);
+		expect(result.state.events.at(-1)).toEqual({
+			at: T0 + 25 * MIN,
+			type: 'completed',
+			kind: 'work',
+			taskName: 'Raport kwartalny',
+			durationMs: 25 * MIN,
+		});
+		expect(result.effects).toHaveLength(2);
+		expect(result.effects[0]).toEqual({ type: 'persist' });
+		expect(result.effects[1]).toMatchObject({ type: 'banner' });
+		expect((result.effects[1] as { text: string }).text).toContain('aplikacja była zamknięta');
+	});
+
+	it('keeps a paused Session paused with the same time left', () => {
+		const paused = reduce(runningWork(), { type: 'PAUSE', at: T0 + 10 * MIN }).state;
+
+		const result = reduce(paused, { type: 'REOPEN', at: T0 + 500 * MIN });
+
+		expect(result.state).toBe(paused);
+		expect(result.effects).toEqual([]);
+		expect(remaining(result.state.session!, T0 + 500 * MIN)).toBe(15 * MIN);
+	});
+});
