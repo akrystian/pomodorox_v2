@@ -164,7 +164,7 @@ describe('Work Session', () => {
 		expect(result.state.events).toEqual([
 			{ at: T0 + 1000, type: 'started', kind: 'work', taskName: 'Raport kwartalny', durationMs: null },
 		]);
-		expect(result.effects).toEqual([{ type: 'persist' }]);
+		expect(result.effects).toEqual([{ type: 'persist' }, { type: 'permissionPrompt' }]);
 	});
 
 	it('locks the Active Task while Work is running', () => {
@@ -203,6 +203,7 @@ describe('Work Session', () => {
 		]);
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
 	});
@@ -228,6 +229,7 @@ describe('Breaks', () => {
 		]);
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
 		]);
 	});
@@ -281,6 +283,7 @@ describe('Stop', () => {
 		});
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
 	});
@@ -345,6 +348,7 @@ describe('Switching Sessions', () => {
 		]);
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
 	});
@@ -456,7 +460,7 @@ describe('Session announcements', () => {
 		const denied = {
 			...initialState(),
 			soundEnabled: false,
-			notificationPermission: 'denied',
+			notificationPermission: 'denied' as const,
 			permissionPrompted: true,
 		};
 		const started = reduce(denied, { type: 'START', at: T0, kind: 'shortBreak' }).state;
@@ -470,7 +474,7 @@ describe('Session announcements', () => {
 	});
 
 	it('rejects enabling notifications after permission is denied', () => {
-		const state = { ...initialState(), notificationPermission: 'denied' };
+		const state = { ...initialState(), notificationPermission: 'denied' as const };
 
 		const result = reduce(state, { type: 'TOGGLE_NOTIFICATIONS' });
 

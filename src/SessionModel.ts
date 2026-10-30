@@ -46,6 +46,10 @@ export type SessionState = {
 	activeTaskId: string | null;
 	session: Session | null;
 	events: SessionEvent[];
+	soundEnabled: boolean;
+	notificationsEnabled: boolean;
+	notificationPermission: NotificationPermission;
+	permissionPrompted: boolean;
 };
 
 export type SessionAction =
@@ -61,7 +65,10 @@ export type SessionAction =
 	| { type: 'STOP'; at: number }
 	| { type: 'PAUSE'; at: number }
 	| { type: 'RESUME'; at: number }
-	| { type: 'TICK'; at: number };
+	| { type: 'TICK'; at: number }
+	| { type: 'TOGGLE_SOUND' }
+	| { type: 'TOGGLE_NOTIFICATIONS' }
+	| { type: 'PERMISSION_ANSWER'; permission: NotificationPermission };
 
 export type ReduceResult = {
 	state: SessionState;
@@ -74,7 +81,12 @@ export type Outcome =
 	| { type: 'rejected'; reason: string }
 	| { type: 'confirm'; question: string };
 
-export type Effect = { type: 'persist' } | { type: 'banner'; text: string };
+export type Effect =
+	| { type: 'persist' }
+	| { type: 'banner'; text: string }
+	| { type: 'sound' }
+	| { type: 'notification'; text: string }
+	| { type: 'permissionPrompt' };
 
 // Time is derived from timestamps, never counted by ticks (ADR-0001).
 const runTime = (session: Session, at: number) =>
@@ -91,6 +103,10 @@ export const initialState = (): SessionState => ({
 	activeTaskId: null,
 	session: null,
 	events: [],
+	soundEnabled: true,
+	notificationsEnabled: true,
+	notificationPermission: 'default',
+	permissionPrompted: false,
 });
 
 const ok = (state: SessionState, effects: Effect[] = []): ReduceResult => ({
@@ -142,7 +158,16 @@ function complete(state: SessionState & { session: Session }, at: number): Settl
 	const text = task
 		? strings.timer.workCompleted(task.name, task.pomodoroCount, task.estimate)
 		: strings.timer.breakCompleted;
-	return { state: { ...next, session: null }, effects: [{ type: 'banner', text }] };
+	const effects: Effect[] = [];
+	if (state.soundEnabled) effects.push({ type: 'sound' });
+	if (state.notificationsEnabled && state.notificationPermission === 'granted') {
+		effects.push({
+			type: 'notification',
+			text: task ? text : strings.timer.breakNotification,
+		});
+	}
+	effects.push({ type: 'banner', text });
+	return { state: { ...next, session: null }, effects };
 }
 
 const abandon = (state: SessionState & { session: Session }, at: number): SessionState => ({
@@ -209,7 +234,15 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 				pausedAt: null,
 				pausedTotal: 0,
 			};
-			return ok(logEvent({ ...current, session }, action.at, 'started'), settled.effects);
+			const permissionEffects: Effect[] = state.permissionPrompted ? [] : [{ type: 'permissionPrompt' }];
+			return ok(
+				logEvent(
+					{ ...current, session, permissionPrompted: true },
+					action.at,
+					'started',
+				),
+				[...settled.effects, ...permissionEffects],
+			);
 		}
 
 		case 'STOP': {
@@ -246,5 +279,17 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
 			return ok(settled.state, settled.effects);
 		}
+
+		case 'TOGGLE_SOUND':
+			return ok({ ...state, soundEnabled: !state.soundEnabled });
+
+		case 'TOGGLE_NOTIFICATIONS':
+			if (state.notificationPermission === 'denied') {
+				return reject(state, strings.settings.notificationsDenied);
+			}
+			return ok({ ...state, notificationsEnabled: !state.notificationsEnabled });
+
+		case 'PERMISSION_ANSWER':
+			return ok({ ...state, notificationPermission: action.permission });
 	}
 }
