@@ -409,3 +409,89 @@ describe('Pause and Resume', () => {
 		expect(result.state.events.at(-1)).toMatchObject({ type: 'abandoned', durationMs: 10 * MIN });
 	});
 });
+
+describe('Session announcements', () => {
+	it('announces completed Work with sound, a system notification, and a banner', () => {
+		const state = withTasks();
+		const selected = reduce(state, { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
+		const started = reduce(
+			{
+				...selected,
+				tasks: selected.tasks.map((task) =>
+					task.id === REPORT_ID ? { ...task, pomodoroCount: 2 } : task,
+				),
+				notificationPermission: 'granted',
+				permissionPrompted: true,
+			},
+			{ type: 'START', at: T0, kind: 'work' },
+		).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 25 * MIN });
+
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'sound' },
+			{ type: 'notification', text: 'Praca zakończona: Raport kwartalny (3/4). Czas na przerwę.' },
+			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (3/4). Czas na przerwę.' },
+		]);
+	});
+
+	it('announces completed breaks with sound, a system notification, and a banner', () => {
+		const started = reduce(
+			{ ...initialState(), notificationPermission: 'granted', permissionPrompted: true },
+			{ type: 'START', at: T0, kind: 'shortBreak' },
+		).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 5 * MIN });
+
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'sound' },
+			{ type: 'notification', text: 'Przerwa zakończona…' },
+			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
+		]);
+	});
+
+	it('keeps the in-app banner when sound is off and notifications are denied', () => {
+		const denied = {
+			...initialState(),
+			soundEnabled: false,
+			notificationPermission: 'denied',
+			permissionPrompted: true,
+		};
+		const started = reduce(denied, { type: 'START', at: T0, kind: 'shortBreak' }).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 5 * MIN });
+
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
+		]);
+	});
+
+	it('rejects enabling notifications after permission is denied', () => {
+		const state = { ...initialState(), notificationPermission: 'denied' };
+
+		const result = reduce(state, { type: 'TOGGLE_NOTIFICATIONS' });
+
+		expect(result.outcome.type).toBe('rejected');
+		expect(result.state).toBe(state);
+		expect(result.effects).toEqual([]);
+	});
+
+	it('prompts for notification permission only on the first START', () => {
+		const first = reduce(initialState(), { type: 'START', at: T0, kind: 'shortBreak' });
+
+		expect(first.effects).toContainEqual({ type: 'permissionPrompt' });
+
+		const answered = reduce(first.state, { type: 'PERMISSION_ANSWER', permission: 'granted' });
+		const second = reduce(answered.state, {
+			type: 'START',
+			at: T0 + MIN,
+			kind: 'longBreak',
+			confirmed: true,
+		});
+
+		expect(second.effects).not.toContainEqual({ type: 'permissionPrompt' });
+	});
+});
