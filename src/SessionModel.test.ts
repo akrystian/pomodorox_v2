@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialState, reduce, remaining } from './SessionModel';
+import { initialState, reduce, remaining, todaysEvents } from './SessionModel';
 
 describe('SessionModel', () => {
 	it('adds a named Task with its Estimate at the bottom of the list', () => {
@@ -519,5 +519,43 @@ describe('Session announcements', () => {
 		});
 
 		expect(second.effects).not.toContainEqual({ type: 'permissionPrompt' });
+	});
+});
+
+describe('Event Log', () => {
+	const at = (h: number, d = 0) => new Date(2026, 0, 10 + d, h).getTime();
+	const ev = (t: number) => ({ at: t, type: 'started' as const, kind: 'work' as const, taskName: null, durationMs: null });
+
+	it("selects only today's Events, newest first", () => {
+		const events = [ev(at(23, -1)), ev(at(9)), ev(at(10))];
+		expect(todaysEvents(events, at(12))).toEqual([ev(at(10)), ev(at(9))]);
+	});
+
+	it('asks for confirmation before clearing', () => {
+		const state = { ...runningWork(), events: [ev(T0)] };
+		expect(reduce(state, { type: 'CLEAR_LOG', at: T0 })).toEqual({
+			state,
+			outcome: { type: 'confirm', question: 'Usunąć wszystkie zdarzenia, także z poprzednich dni?' },
+			effects: [],
+		});
+	});
+
+	it('removes all Events when confirmed, keeping counts and the running Session', () => {
+		const base = runningWork();
+		const state = {
+			...base,
+			tasks: base.tasks.map((t) => ({ ...t, pomodoroCount: 2 })),
+			events: [ev(at(9, -3)), ev(at(9))],
+		};
+		const result = reduce(state, { type: 'CLEAR_LOG', at: at(12), confirmed: true });
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state).toEqual({ ...state, events: [] });
+	});
+
+	it('logs a Session completing after a clear as the first row', () => {
+		const cleared = reduce(runningWork(), { type: 'CLEAR_LOG', at: T0 + MIN, confirmed: true }).state;
+		const done = reduce(cleared, { type: 'TICK', at: T0 + 30 * MIN }).state;
+		expect(done.events).toHaveLength(1);
+		expect(todaysEvents(done.events, T0 + 30 * MIN)[0]).toMatchObject({ type: 'completed' });
 	});
 });

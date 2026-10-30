@@ -68,7 +68,8 @@ export type SessionAction =
 	| { type: 'TICK'; at: number; silent?: boolean }
 	| { type: 'TOGGLE_SOUND' }
 	| { type: 'TOGGLE_NOTIFICATIONS' }
-	| { type: 'PERMISSION_ANSWER'; permission: NotificationPermission };
+	| { type: 'PERMISSION_ANSWER'; permission: NotificationPermission }
+	| { type: 'CLEAR_LOG'; at: number; confirmed?: boolean };
 
 export type ReduceResult = {
 	state: SessionState;
@@ -97,6 +98,12 @@ export const remaining = (session: Session, at: number) =>
 
 const scheduledEnd = (session: Session) =>
 	session.startedAt + session.pausedTotal + DURATIONS[session.kind];
+
+/** Today's Events (from local midnight), newest first. */
+export const todaysEvents = (events: SessionEvent[], now: number): SessionEvent[] => {
+	const midnight = new Date(now).setHours(0, 0, 0, 0);
+	return events.filter((event) => event.at >= midnight).reverse();
+};
 
 export const initialState = (): SessionState => ({
 	tasks: [],
@@ -275,6 +282,10 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 			};
 			return ok(logEvent({ ...state, session: resumed }, action.at, 'resumed'));
 		}
+
+		case 'CLEAR_LOG':
+			if (!action.confirmed) return needConfirm(state, strings.eventLog.confirmClear);
+			return ok({ ...state, events: [] });
 
 		case 'TICK': {
 			const settled = completeIfElapsed(state, action.at, !action.silent);
