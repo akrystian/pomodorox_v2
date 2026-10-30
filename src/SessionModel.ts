@@ -65,7 +65,7 @@ export type SessionAction =
 	| { type: 'STOP'; at: number }
 	| { type: 'PAUSE'; at: number }
 	| { type: 'RESUME'; at: number }
-	| { type: 'TICK'; at: number }
+	| { type: 'TICK'; at: number; silent?: boolean }
 	| { type: 'TOGGLE_SOUND' }
 	| { type: 'TOGGLE_NOTIFICATIONS' }
 	| { type: 'PERMISSION_ANSWER'; permission: NotificationPermission };
@@ -135,15 +135,15 @@ type Settled = { state: SessionState; effects: Effect[] };
 
 // A Session whose time ran out is Completed at its scheduledEnd, whichever action
 // reaches the reducer first, so a late TICK, STOP or START never abandons it.
-function completeIfElapsed(state: SessionState, at: number): Settled {
+function completeIfElapsed(state: SessionState, at: number, announce = true): Settled {
 	const { session } = state;
 	if (!session || session.pausedAt !== null || remaining(session, at) > 0) {
 		return { state, effects: [] };
 	}
-	return complete({ ...state, session }, scheduledEnd(session));
+	return complete({ ...state, session }, scheduledEnd(session), announce);
 }
 
-function complete(state: SessionState & { session: Session }, at: number): Settled {
+function complete(state: SessionState & { session: Session }, at: number, announce = true): Settled {
 	const { kind, taskId } = state.session;
 	let next = logEvent(state, at, 'completed', DURATIONS[kind]);
 	if (kind === 'work') {
@@ -159,14 +159,16 @@ function complete(state: SessionState & { session: Session }, at: number): Settl
 		? strings.timer.workCompleted(task.name, task.pomodoroCount, task.estimate)
 		: strings.timer.breakCompleted;
 	const effects: Effect[] = [];
-	if (state.soundEnabled) effects.push({ type: 'sound' });
-	if (state.notificationsEnabled && state.notificationPermission === 'granted') {
-		effects.push({
-			type: 'notification',
-			text: task ? text : strings.timer.breakNotification,
-		});
+	if (announce) {
+		if (state.soundEnabled) effects.push({ type: 'sound' });
+		if (state.notificationsEnabled && state.notificationPermission === 'granted') {
+			effects.push({
+				type: 'notification',
+				text: task ? text : strings.timer.breakNotification,
+			});
+		}
+		effects.push({ type: 'banner', text });
 	}
-	effects.push({ type: 'banner', text });
 	return { state: { ...next, session: null }, effects };
 }
 
@@ -275,7 +277,7 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 		}
 
 		case 'TICK': {
-			const settled = completeIfElapsed(state, action.at);
+			const settled = completeIfElapsed(state, action.at, !action.silent);
 			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
 			return ok(settled.state, settled.effects);
 		}
