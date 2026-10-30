@@ -243,3 +243,17 @@ button.primary:disabled {
 	cursor: not-allowed;
 	opacity: 0.5;
 }
+
+.event-log {
+	width: 100%;
+	margin-top: 8px;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+
+.event-log th,
+.event-log td {
+	padding: 4px 8px;
+	text-align: left;
+	border-bottom: 1px solid var(--line);
+}
