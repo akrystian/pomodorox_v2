@@ -40,12 +40,16 @@ describe('state persistence', () => {
 					durationMs: null,
 				},
 			],
+			soundEnabled: false,
+			notificationsEnabled: true,
+			notificationPermission: 'granted',
+			permissionPrompted: true,
 		};
 
 		saveState(state, storage);
 
 		expect(JSON.parse(storage.values.get(STORAGE_KEY)!)).toEqual({
-			schemaVersion: SCHEMA_VERSION,
+			schemaVersion: 3,
 			state,
 		});
 		expect(loadState(storage)).toEqual(state);
@@ -60,6 +64,29 @@ describe('state persistence', () => {
 			activeTaskId: null,
 			session: null,
 			events: [],
+			soundEnabled: true,
+			notificationsEnabled: true,
+			notificationPermission: 'default',
+			permissionPrompted: false,
+		});
+	});
+
+	it('adds default preferences when loading schema version 2', () => {
+		const storage = memoryStorage();
+		const state = {
+			tasks: [task],
+			activeTaskId: task.id,
+			session: null,
+			events: [],
+		};
+		storage.setItem(STORAGE_KEY, JSON.stringify({ schemaVersion: 2, state }));
+
+		expect(loadState(storage)).toEqual({
+			...state,
+			soundEnabled: true,
+			notificationsEnabled: true,
+			notificationPermission: 'default',
+			permissionPrompted: false,
 		});
 	});
 
@@ -73,6 +100,10 @@ describe('state persistence', () => {
 				{ at: 1_761_500_000_000, type: 'started', kind: 'work', taskName: 'Raport kwartalny', durationMs: null },
 				{ at: 1_761_500_720_000, type: 'abandoned', kind: 'work', taskName: 'Raport kwartalny', durationMs: 720_000 },
 			],
+			soundEnabled: true,
+			notificationsEnabled: false,
+			notificationPermission: 'denied',
+			permissionPrompted: true,
 		};
 
 		saveState(state, storage);

@@ -2,7 +2,7 @@ import { EVENT_TYPES, SESSION_KINDS, initialState } from './SessionModel';
 import type { Session, SessionEvent, SessionState, Task } from './SessionModel';
 
 export const STORAGE_KEY = 'pomodorox.session';
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 type StorageAdapter = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -10,6 +10,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
 
 const isKind = (value: unknown) => SESSION_KINDS.some((kind) => kind === value);
+
+const isPermission = (value: unknown): value is NotificationPermission =>
+	value === 'default' || value === 'granted' || value === 'denied';
 
 const isNullableString = (value: unknown) => value === null || typeof value === 'string';
 
@@ -60,13 +63,18 @@ function isSessionState(value: unknown): value is SessionState {
 		isNullableString(value.activeTaskId) &&
 		(value.session === null || isSession(value.session)) &&
 		Array.isArray(value.events) &&
-		value.events.every(isEvent)
+		value.events.every(isEvent) &&
+		typeof value.soundEnabled === 'boolean' &&
+		typeof value.notificationsEnabled === 'boolean' &&
+		isPermission(value.notificationPermission) &&
+		typeof value.permissionPrompted === 'boolean'
 	);
 }
 
 // Version 1 stored only Tasks.
 function migrate(schemaVersion: unknown, state: unknown): unknown {
 	if (schemaVersion === 1 && isRecord(state)) return { ...initialState(), tasks: state.tasks };
+	if (schemaVersion === 2 && isRecord(state)) return { ...initialState(), ...state };
 	if (schemaVersion === SCHEMA_VERSION) return state;
 	return null;
 }
