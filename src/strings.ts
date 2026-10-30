@@ -37,6 +37,22 @@ export const strings = {
 	eventLog: {
 		heading: 'Dziennik (dziś)',
 		placeholder: 'Tu pojawią się dzisiejsze zdarzenia.',
+		clear: 'Wyczyść',
+		confirmClear: 'Usunąć wszystkie zdarzenia, także z poprzednich dni?',
+		columns: {
+			time: 'Godzina',
+			event: 'Zdarzenie',
+			kind: 'Rodzaj sesji',
+			task: 'Zadanie',
+			duration: 'Czas trwania',
+		},
+		types: {
+			started: 'rozpoczęto',
+			paused: 'wstrzymano',
+			resumed: 'wznowiono',
+			completed: 'ukończono',
+			abandoned: 'porzucono',
+		},
 	},
 	confirm: {
 		yes: 'Tak',

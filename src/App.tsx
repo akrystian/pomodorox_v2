@@ -2,15 +2,21 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { strings } from './strings';
 import { ReloadPrompt } from './ReloadPrompt';
 import { ConfirmDialog } from './ConfirmDialog';
-import { DURATIONS, SESSION_KINDS, reduce, remaining } from './SessionModel';
+import { DURATIONS, SESSION_KINDS, reduce, remaining, todaysEvents } from './SessionModel';
 import type { SessionAction, SessionState } from './SessionModel';
 import { loadState, saveState } from './statePersistence';
 
 type StartAction = Extract<SessionAction, { type: 'START' }>;
+type PendingAction = StartAction | Extract<SessionAction, { type: 'CLEAR_LOG' }>;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
 // Rounds up, so a fresh Session shows 25:00 and 00:00 only at the very end.
+const formatClock = (at: number) => {
+	const date = new Date(at);
+	return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 const formatRemaining = (ms: number) => {
 	const seconds = Math.ceil(ms / 1000);
 	return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
@@ -21,7 +27,7 @@ export function App() {
 	const stateRef = useRef(state);
 	const [now, setNow] = useState(() => Date.now());
 	const [banner, setBanner] = useState<string | null>(null);
-	const [pending, setPending] = useState<{ action: StartAction; question: string } | null>(null);
+	const [pending, setPending] = useState<{ action: PendingAction; question: string } | null>(null);
 	const [name, setName] = useState('');
 	const [estimate, setEstimate] = useState('1');
 	const [error, setError] = useState<string | null>(null);
@@ -65,6 +71,7 @@ export function App() {
 	}, [session, timeLeft]);
 
 	const activeTask = state.tasks.find((task) => task.id === state.activeTaskId);
+	const logRows = todaysEvents(state.events, now);
 	const workLocked = session?.kind === 'work';
 
 	const start = (action: StartAction) => {
@@ -78,7 +85,15 @@ export function App() {
 	const confirmPending = () => {
 		if (!pending) return;
 		setPending(null);
-		start({ ...pending.action, at: Date.now(), confirmed: true });
+		const action = { ...pending.action, at: Date.now(), confirmed: true };
+		if (action.type === 'START') start(action);
+		else dispatch(action);
+	};
+
+	const clearLog = () => {
+		const action: PendingAction = { type: 'CLEAR_LOG', at: Date.now() };
+		const outcome = dispatch(action);
+		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
 	};
 
 	const stop = () => {
@@ -229,7 +244,35 @@ export function App() {
 			</section>
 			<section class="section" aria-labelledby="log-heading">
 				<h2 id="log-heading">{strings.eventLog.heading}</h2>
-				<p class="placeholder">{strings.eventLog.placeholder}</p>
+				<button type="button" onClick={clearLog}>
+					{strings.eventLog.clear}
+				</button>
+				{logRows.length === 0 ? (
+					<p class="placeholder">{strings.eventLog.placeholder}</p>
+				) : (
+					<table class="event-log">
+						<thead>
+							<tr>
+								<th>{strings.eventLog.columns.time}</th>
+								<th>{strings.eventLog.columns.event}</th>
+								<th>{strings.eventLog.columns.kind}</th>
+								<th>{strings.eventLog.columns.task}</th>
+								<th>{strings.eventLog.columns.duration}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{logRows.map((event, index) => (
+								<tr key={`${event.at}-${index}`}>
+									<td>{formatClock(event.at)}</td>
+									<td>{strings.eventLog.types[event.type]}</td>
+									<td>{strings.timer.kinds[event.kind]}</td>
+									<td>{event.taskName ?? ''}</td>
+									<td>{event.durationMs === null ? '' : formatRemaining(event.durationMs)}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				)}
 			</section>
 			{pending && (
 				<ConfirmDialog
