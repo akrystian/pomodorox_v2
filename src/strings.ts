@@ -25,6 +25,13 @@ export const strings = {
 		keepOpenNote:
 			'Aplikacja musi pozostać otwarta (także w tle), aby powiadomienia docierały na czas.',
 		breakCompleted: 'Przerwa zakończona. Wracamy do pracy?',
+		breakNotification: 'Przerwa zakończona…',
+	},
+	settings: {
+		sound: 'Dźwięk',
+		notifications: 'Powiadomienia',
+		notificationsDenied:
+			'Powiadomienia są zablokowane. Zmień uprawnienia tej witryny w ustawieniach przeglądarki.',
 	},
 	tasks: {
 		heading: 'Zadania',
@@ -40,6 +47,22 @@ export const strings = {
 	eventLog: {
 		heading: 'Dziennik (dziś)',
 		placeholder: 'Tu pojawią się dzisiejsze zdarzenia.',
+		clear: 'Wyczyść',
+		confirmClear: 'Usunąć wszystkie zdarzenia, także z poprzednich dni?',
+		columns: {
+			time: 'Godzina',
+			event: 'Zdarzenie',
+			kind: 'Rodzaj sesji',
+			task: 'Zadanie',
+			duration: 'Czas trwania',
+		},
+		types: {
+			started: 'rozpoczęto',
+			paused: 'wstrzymano',
+			resumed: 'wznowiono',
+			completed: 'ukończono',
+			abandoned: 'porzucono',
+		},
 	},
 	confirm: {
 		yes: 'Tak',

@@ -2,15 +2,21 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { strings } from './strings';
 import { ReloadPrompt } from './ReloadPrompt';
 import { ConfirmDialog } from './ConfirmDialog';
-import { DURATIONS, SESSION_KINDS, reduce, remaining } from './SessionModel';
+import { DURATIONS, SESSION_KINDS, reduce, remaining, todaysEvents } from './SessionModel';
 import type { SessionAction, SessionState } from './SessionModel';
 import { loadState, saveState } from './statePersistence';
 
 type StartAction = Extract<SessionAction, { type: 'START' }>;
+type PendingAction = StartAction | Extract<SessionAction, { type: 'CLEAR_LOG' }>;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
 // Rounds up, so a fresh Session shows 25:00 and 00:00 only at the very end.
+const formatClock = (at: number) => {
+	const date = new Date(at);
+	return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 const formatRemaining = (ms: number) => {
 	const seconds = Math.ceil(ms / 1000);
 	return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
@@ -19,9 +25,10 @@ const formatRemaining = (ms: number) => {
 export function App() {
 	const [state, setState] = useState<SessionState>(() => loadState());
 	const stateRef = useRef(state);
+	const initialSession = useRef(state.session !== null);
 	const [now, setNow] = useState(() => Date.now());
 	const [banner, setBanner] = useState<string | null>(null);
-	const [pending, setPending] = useState<{ action: StartAction; question: string } | null>(null);
+	const [pending, setPending] = useState<{ action: PendingAction; question: string } | null>(null);
 	const [name, setName] = useState('');
 	const [estimate, setEstimate] = useState('1');
 	const [error, setError] = useState<string | null>(null);
@@ -33,9 +40,40 @@ export function App() {
 		for (const effect of result.effects) {
 			if (effect.type === 'persist') saveState(result.state);
 			if (effect.type === 'banner') setBanner(effect.text);
+			if (effect.type === 'sound') {
+				const audio = new Audio(`${import.meta.env.BASE_URL}session-end.wav`);
+				void audio.play().catch(() => {});
+			}
+			if (effect.type === 'notification' && typeof Notification !== 'undefined') {
+				if (Notification.permission === 'granted') {
+					try {
+						new Notification(strings.appName, { body: effect.text });
+					} catch {
+						// Permission may have changed since the reducer emitted the effect.
+					}
+				}
+			}
+			if (effect.type === 'permissionPrompt') {
+				if (typeof Notification === 'undefined') {
+					dispatch({ type: 'PERMISSION_ANSWER', permission: 'denied' });
+				} else {
+					void Notification.requestPermission()
+						.then((permission) => dispatch({ type: 'PERMISSION_ANSWER', permission }))
+						.catch(() => dispatch({ type: 'PERMISSION_ANSWER', permission: 'denied' }));
+				}
+			}
 		}
 		return result.outcome;
 	};
+
+	useEffect(() => {
+		if (
+			typeof Notification !== 'undefined' &&
+			Notification.permission !== stateRef.current.notificationPermission
+		) {
+			dispatch({ type: 'PERMISSION_ANSWER', permission: Notification.permission });
+		}
+	}, []);
 
 	// On startup, settle a Session whose time ran out while the app was closed.
 	useEffect(() => {
@@ -49,17 +87,19 @@ export function App() {
 	const { session } = state;
 	useEffect(() => {
 		if (!session) return;
-		const tick = () => {
+		const tick = (silent = false) => {
 			const at = Date.now();
 			setNow(at);
-			dispatch({ type: 'TICK', at });
+			dispatch({ type: 'TICK', at, silent });
 		};
-		tick();
-		const interval = setInterval(tick, 1000);
-		document.addEventListener('visibilitychange', tick);
+		tick(initialSession.current);
+		initialSession.current = false;
+		const refresh = () => tick();
+		const interval = setInterval(refresh, 1000);
+		document.addEventListener('visibilitychange', refresh);
 		return () => {
 			clearInterval(interval);
-			document.removeEventListener('visibilitychange', tick);
+			document.removeEventListener('visibilitychange', refresh);
 		};
 	}, [session]);
 
@@ -72,6 +112,7 @@ export function App() {
 	}, [session, timeLeft]);
 
 	const activeTask = state.tasks.find((task) => task.id === state.activeTaskId);
+	const logRows = todaysEvents(state.events, now);
 	const workLocked = session?.kind === 'work';
 
 	const start = (action: StartAction) => {
@@ -85,7 +126,15 @@ export function App() {
 	const confirmPending = () => {
 		if (!pending) return;
 		setPending(null);
-		start({ ...pending.action, at: Date.now(), confirmed: true });
+		const action = { ...pending.action, at: Date.now(), confirmed: true };
+		if (action.type === 'START') start(action);
+		else dispatch(action);
+	};
+
+	const clearLog = () => {
+		const action: PendingAction = { type: 'CLEAR_LOG', at: Date.now() };
+		const outcome = dispatch(action);
+		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
 	};
 
 	const stop = () => {
@@ -163,6 +212,33 @@ export function App() {
 						</button>
 					)}
 				</div>
+				<div class="timer-settings">
+					<label>
+						<input
+							type="checkbox"
+							checked={state.soundEnabled}
+							onChange={() => dispatch({ type: 'TOGGLE_SOUND' })}
+						/>
+						{strings.settings.sound}
+					</label>
+					<label>
+						<input
+							type="checkbox"
+							checked={state.notificationsEnabled}
+							disabled={state.notificationPermission === 'denied'}
+							aria-describedby={
+								state.notificationPermission === 'denied' ? 'notifications-hint' : undefined
+							}
+							onChange={() => dispatch({ type: 'TOGGLE_NOTIFICATIONS' })}
+						/>
+						{strings.settings.notifications}
+					</label>
+				</div>
+				{state.notificationPermission === 'denied' && (
+					<p id="notifications-hint" class="placeholder">
+						{strings.settings.notificationsDenied}
+					</p>
+				)}
 				{!activeTask && (
 					<p id="work-hint" class="placeholder">
 						{strings.timer.noActiveTask}
@@ -237,7 +313,35 @@ export function App() {
 			</section>
 			<section class="section" aria-labelledby="log-heading">
 				<h2 id="log-heading">{strings.eventLog.heading}</h2>
-				<p class="placeholder">{strings.eventLog.placeholder}</p>
+				<button type="button" onClick={clearLog}>
+					{strings.eventLog.clear}
+				</button>
+				{logRows.length === 0 ? (
+					<p class="placeholder">{strings.eventLog.placeholder}</p>
+				) : (
+					<table class="event-log">
+						<thead>
+							<tr>
+								<th>{strings.eventLog.columns.time}</th>
+								<th>{strings.eventLog.columns.event}</th>
+								<th>{strings.eventLog.columns.kind}</th>
+								<th>{strings.eventLog.columns.task}</th>
+								<th>{strings.eventLog.columns.duration}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{logRows.map((event, index) => (
+								<tr key={`${event.at}-${index}`}>
+									<td>{formatClock(event.at)}</td>
+									<td>{strings.eventLog.types[event.type]}</td>
+									<td>{strings.timer.kinds[event.kind]}</td>
+									<td>{event.taskName ?? ''}</td>
+									<td>{event.durationMs === null ? '' : formatRemaining(event.durationMs)}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				)}
 			</section>
 			{pending && (
 				<ConfirmDialog

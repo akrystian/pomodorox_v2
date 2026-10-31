@@ -125,6 +125,18 @@ body {
 	margin-bottom: 8px;
 }
 
+.timer-settings {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+}
+
+.timer-settings label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
 .confirm-dialog {
 	max-width: min(420px, calc(100vw - 32px));
 	padding: 16px;
@@ -242,4 +254,18 @@ button.primary {
 button.primary:disabled {
 	cursor: not-allowed;
 	opacity: 0.5;
+}
+
+.event-log {
+	width: 100%;
+	margin-top: 8px;
+	border-collapse: collapse;
+	font-variant-numeric: tabular-nums;
+}
+
+.event-log th,
+.event-log td {
+	padding: 4px 8px;
+	text-align: left;
+	border-bottom: 1px solid var(--line);
 }

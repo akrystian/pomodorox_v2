@@ -46,6 +46,10 @@ export type SessionState = {
 	activeTaskId: string | null;
 	session: Session | null;
 	events: SessionEvent[];
+	soundEnabled: boolean;
+	notificationsEnabled: boolean;
+	notificationPermission: NotificationPermission;
+	permissionPrompted: boolean;
 };
 
 export type SessionAction =
@@ -61,8 +65,12 @@ export type SessionAction =
 	| { type: 'STOP'; at: number }
 	| { type: 'PAUSE'; at: number }
 	| { type: 'RESUME'; at: number }
-	| { type: 'TICK'; at: number }
-	| { type: 'REOPEN'; at: number };
+	| { type: 'TICK'; at: number; silent?: boolean }
+	| { type: 'REOPEN'; at: number }
+	| { type: 'TOGGLE_SOUND' }
+	| { type: 'TOGGLE_NOTIFICATIONS' }
+	| { type: 'PERMISSION_ANSWER'; permission: NotificationPermission }
+	| { type: 'CLEAR_LOG'; at: number; confirmed?: boolean };
 
 export type ReduceResult = {
 	state: SessionState;
@@ -75,7 +83,12 @@ export type Outcome =
 	| { type: 'rejected'; reason: string }
 	| { type: 'confirm'; question: string };
 
-export type Effect = { type: 'persist' } | { type: 'banner'; text: string };
+export type Effect =
+	| { type: 'persist' }
+	| { type: 'banner'; text: string }
+	| { type: 'sound' }
+	| { type: 'notification'; text: string }
+	| { type: 'permissionPrompt' };
 
 // Time is derived from timestamps, never counted by ticks (ADR-0001).
 const runTime = (session: Session, at: number) =>
@@ -87,11 +100,21 @@ export const remaining = (session: Session, at: number) =>
 const scheduledEnd = (session: Session) =>
 	session.startedAt + session.pausedTotal + DURATIONS[session.kind];
 
+/** Today's Events (from local midnight), newest first. */
+export const todaysEvents = (events: SessionEvent[], now: number): SessionEvent[] => {
+	const midnight = new Date(now).setHours(0, 0, 0, 0);
+	return events.filter((event) => event.at >= midnight).reverse();
+};
+
 export const initialState = (): SessionState => ({
 	tasks: [],
 	activeTaskId: null,
 	session: null,
 	events: [],
+	soundEnabled: true,
+	notificationsEnabled: true,
+	notificationPermission: 'default',
+	permissionPrompted: false,
 });
 
 const ok = (state: SessionState, effects: Effect[] = []): ReduceResult => ({
@@ -120,15 +143,15 @@ type Settled = { state: SessionState; effects: Effect[] };
 
 // A Session whose time ran out is Completed at its scheduledEnd, whichever action
 // reaches the reducer first, so a late TICK, STOP or START never abandons it.
-function completeIfElapsed(state: SessionState, at: number): Settled {
+function completeIfElapsed(state: SessionState, at: number, announce = true): Settled {
 	const { session } = state;
 	if (!session || session.pausedAt !== null || remaining(session, at) > 0) {
 		return { state, effects: [] };
 	}
-	return complete({ ...state, session }, scheduledEnd(session));
+	return complete({ ...state, session }, scheduledEnd(session), announce);
 }
 
-function complete(state: SessionState & { session: Session }, at: number): Settled {
+function complete(state: SessionState & { session: Session }, at: number, announce = true): Settled {
 	const { kind, taskId } = state.session;
 	let next = logEvent(state, at, 'completed', DURATIONS[kind]);
 	if (kind === 'work') {
@@ -143,7 +166,18 @@ function complete(state: SessionState & { session: Session }, at: number): Settl
 	const text = task
 		? strings.timer.workCompleted(task.name, task.pomodoroCount, task.estimate)
 		: strings.timer.breakCompleted;
-	return { state: { ...next, session: null }, effects: [{ type: 'banner', text }] };
+	const effects: Effect[] = [];
+	if (announce) {
+		if (state.soundEnabled) effects.push({ type: 'sound' });
+		if (state.notificationsEnabled && state.notificationPermission === 'granted') {
+			effects.push({
+				type: 'notification',
+				text: task ? text : strings.timer.breakNotification,
+			});
+		}
+		effects.push({ type: 'banner', text });
+	}
+	return { state: { ...next, session: null }, effects };
 }
 
 const abandon = (state: SessionState & { session: Session }, at: number): SessionState => ({
@@ -210,7 +244,15 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 				pausedAt: null,
 				pausedTotal: 0,
 			};
-			return ok(logEvent({ ...current, session }, action.at, 'started'), settled.effects);
+			const permissionEffects: Effect[] = state.permissionPrompted ? [] : [{ type: 'permissionPrompt' }];
+			return ok(
+				logEvent(
+					{ ...current, session, permissionPrompted: true },
+					action.at,
+					'started',
+				),
+				[...settled.effects, ...permissionEffects],
+			);
 		}
 
 		case 'STOP': {
@@ -245,16 +287,33 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 		case 'REOPEN': {
 			const settled = completeIfElapsed(state, action.at);
 			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
-			const effects = settled.effects.map((effect) =>
-				effect.type === 'banner' ? { ...effect, text: strings.timer.endedWhileClosed(effect.text) } : effect,
+			// Silent: only the in-app banner, no sound or system notification.
+			const effects = settled.effects.flatMap((effect): Effect[] =>
+				effect.type === 'banner' ? [{ ...effect, text: strings.timer.endedWhileClosed(effect.text) }] : [],
 			);
 			return ok(settled.state, effects);
 		}
 
+		case 'CLEAR_LOG':
+			if (!action.confirmed) return needConfirm(state, strings.eventLog.confirmClear);
+			return ok({ ...state, events: [] });
+
 		case 'TICK': {
-			const settled = completeIfElapsed(state, action.at);
+			const settled = completeIfElapsed(state, action.at, !action.silent);
 			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
 			return ok(settled.state, settled.effects);
 		}
+
+		case 'TOGGLE_SOUND':
+			return ok({ ...state, soundEnabled: !state.soundEnabled });
+
+		case 'TOGGLE_NOTIFICATIONS':
+			if (state.notificationPermission === 'denied') {
+				return reject(state, strings.settings.notificationsDenied);
+			}
+			return ok({ ...state, notificationsEnabled: !state.notificationsEnabled });
+
+		case 'PERMISSION_ANSWER':
+			return ok({ ...state, notificationPermission: action.permission });
 	}
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialState, reduce, remaining } from './SessionModel';
+import { initialState, reduce, remaining, todaysEvents } from './SessionModel';
 
 describe('SessionModel', () => {
 	it('adds a named Task with its Estimate at the bottom of the list', () => {
@@ -164,7 +164,7 @@ describe('Work Session', () => {
 		expect(result.state.events).toEqual([
 			{ at: T0 + 1000, type: 'started', kind: 'work', taskName: 'Raport kwartalny', durationMs: null },
 		]);
-		expect(result.effects).toEqual([{ type: 'persist' }]);
+		expect(result.effects).toEqual([{ type: 'persist' }, { type: 'permissionPrompt' }]);
 	});
 
 	it('locks the Active Task while Work is running', () => {
@@ -203,6 +203,7 @@ describe('Work Session', () => {
 		]);
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
 	});
@@ -228,6 +229,7 @@ describe('Breaks', () => {
 		]);
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
 		]);
 	});
@@ -281,6 +283,7 @@ describe('Stop', () => {
 		});
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
 	});
@@ -345,6 +348,7 @@ describe('Switching Sessions', () => {
 		]);
 		expect(result.effects).toEqual([
 			{ type: 'persist' },
+			{ type: 'sound' },
 			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (1/4). Czas na przerwę.' },
 		]);
 	});
@@ -445,5 +449,151 @@ describe('Reopen', () => {
 		expect(result.state).toBe(paused);
 		expect(result.effects).toEqual([]);
 		expect(remaining(result.state.session!, T0 + 500 * MIN)).toBe(15 * MIN);
+	});
+});
+
+describe('Session announcements', () => {
+	it('completes an elapsed Session silently when reopening the app', () => {
+		const result = reduce(runningWork(), { type: 'TICK', at: T0 + 25 * MIN, silent: true });
+
+		expect(result.state.session).toBeNull();
+		expect(result.state.tasks.find((task) => task.id === REPORT_ID)?.pomodoroCount).toBe(1);
+		expect(result.effects).toEqual([{ type: 'persist' }]);
+	});
+
+	it('announces completed Work with sound, a system notification, and a banner', () => {
+		const state = withTasks();
+		const selected = reduce(state, { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
+		const started = reduce(
+			{
+				...selected,
+				tasks: selected.tasks.map((task) =>
+					task.id === REPORT_ID ? { ...task, pomodoroCount: 2 } : task,
+				),
+				notificationPermission: 'granted',
+				permissionPrompted: true,
+			},
+			{ type: 'START', at: T0, kind: 'work' },
+		).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 25 * MIN });
+
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'sound' },
+			{ type: 'notification', text: 'Praca zakończona: Raport kwartalny (3/4). Czas na przerwę.' },
+			{ type: 'banner', text: 'Praca zakończona: Raport kwartalny (3/4). Czas na przerwę.' },
+		]);
+	});
+
+	it('announces completed breaks with sound, a system notification, and a banner', () => {
+		const started = reduce(
+			{ ...initialState(), notificationPermission: 'granted', permissionPrompted: true },
+			{ type: 'START', at: T0, kind: 'shortBreak' },
+		).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 5 * MIN });
+
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'sound' },
+			{ type: 'notification', text: 'Przerwa zakończona…' },
+			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
+		]);
+	});
+
+	it('keeps the in-app banner when sound is off and notifications are denied', () => {
+		const denied = reduce(
+			{ ...initialState(), notificationPermission: 'denied' as const, permissionPrompted: true },
+			{ type: 'TOGGLE_SOUND' },
+		).state;
+		const started = reduce(denied, { type: 'START', at: T0, kind: 'shortBreak' }).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 5 * MIN });
+
+		expect(denied.soundEnabled).toBe(false);
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
+		]);
+	});
+
+	it('omits system notifications when the notifications switch is off', () => {
+		const enabled = { ...initialState(), notificationPermission: 'granted' as const, permissionPrompted: true };
+		const disabled = reduce(enabled, { type: 'TOGGLE_NOTIFICATIONS' }).state;
+		const started = reduce(disabled, { type: 'START', at: T0, kind: 'shortBreak' }).state;
+
+		const result = reduce(started, { type: 'TICK', at: T0 + 5 * MIN });
+
+		expect(disabled.notificationsEnabled).toBe(false);
+		expect(result.effects).toEqual([
+			{ type: 'persist' },
+			{ type: 'sound' },
+			{ type: 'banner', text: 'Przerwa zakończona. Wracamy do pracy?' },
+		]);
+	});
+
+	it('rejects enabling notifications after permission is denied', () => {
+		const state = { ...initialState(), notificationPermission: 'denied' as const };
+
+		const result = reduce(state, { type: 'TOGGLE_NOTIFICATIONS' });
+
+		expect(result.outcome.type).toBe('rejected');
+		expect(result.state).toBe(state);
+		expect(result.effects).toEqual([]);
+	});
+
+	it('prompts for notification permission only on the first START', () => {
+		const first = reduce(initialState(), { type: 'START', at: T0, kind: 'shortBreak' });
+
+		expect(first.effects).toContainEqual({ type: 'permissionPrompt' });
+
+		const answered = reduce(first.state, { type: 'PERMISSION_ANSWER', permission: 'granted' });
+		const second = reduce(answered.state, {
+			type: 'START',
+			at: T0 + MIN,
+			kind: 'longBreak',
+			confirmed: true,
+		});
+
+		expect(second.effects).not.toContainEqual({ type: 'permissionPrompt' });
+	});
+});
+
+describe('Event Log', () => {
+	const at = (h: number, d = 0) => new Date(2026, 0, 10 + d, h).getTime();
+	const ev = (t: number) => ({ at: t, type: 'started' as const, kind: 'work' as const, taskName: null, durationMs: null });
+
+	it("selects only today's Events, newest first", () => {
+		const events = [ev(at(23, -1)), ev(at(9)), ev(at(10))];
+		expect(todaysEvents(events, at(12))).toEqual([ev(at(10)), ev(at(9))]);
+	});
+
+	it('asks for confirmation before clearing', () => {
+		const state = { ...runningWork(), events: [ev(T0)] };
+		expect(reduce(state, { type: 'CLEAR_LOG', at: T0 })).toEqual({
+			state,
+			outcome: { type: 'confirm', question: 'Usunąć wszystkie zdarzenia, także z poprzednich dni?' },
+			effects: [],
+		});
+	});
+
+	it('removes all Events when confirmed, keeping counts and the running Session', () => {
+		const base = runningWork();
+		const state = {
+			...base,
+			tasks: base.tasks.map((t) => ({ ...t, pomodoroCount: 2 })),
+			events: [ev(at(9, -3)), ev(at(9))],
+		};
+		const result = reduce(state, { type: 'CLEAR_LOG', at: at(12), confirmed: true });
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state).toEqual({ ...state, events: [] });
+	});
+
+	it('logs a Session completing after a clear as the first row', () => {
+		const cleared = reduce(runningWork(), { type: 'CLEAR_LOG', at: T0 + MIN, confirmed: true }).state;
+		const done = reduce(cleared, { type: 'TICK', at: T0 + 30 * MIN }).state;
+		expect(done.events).toHaveLength(1);
+		expect(todaysEvents(done.events, T0 + 30 * MIN)[0]).toMatchObject({ type: 'completed' });
 	});
 });
