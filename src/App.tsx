@@ -32,6 +32,11 @@ export function App() {
 	const [name, setName] = useState('');
 	const [estimate, setEstimate] = useState('1');
 	const [error, setError] = useState<string | null>(null);
+	const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+	const taskListRef = useRef<HTMLUListElement>(null);
+	const draggedTaskId = useRef<string | null>(null);
+	const draggedPointerId = useRef<number | null>(null);
+	const draggedToIndex = useRef<number | null>(null);
 
 	const dispatch = (action: SessionAction) => {
 		const result = reduce(stateRef.current, action);
@@ -149,19 +154,73 @@ export function App() {
 		dispatch({ type: session?.pausedAt === null ? 'PAUSE' : 'RESUME', at });
 	};
 
-	const addTask = (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
+	const saveTask = (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
 		event.preventDefault();
-		const outcome = dispatch({
-			type: 'ADD_TASK',
-			at: Date.now(),
-			id: crypto.randomUUID(),
-			name,
-			estimate,
-		});
+		const outcome =
+			editingTaskId !== null
+				? dispatch({ type: 'EDIT_TASK', id: editingTaskId, name, estimate })
+				: dispatch({
+						type: 'ADD_TASK',
+						at: Date.now(),
+						id: crypto.randomUUID(),
+						name,
+						estimate,
+					});
 		if (outcome.type === 'rejected') {
 			setError(outcome.reason);
 			return;
 		}
+		setEditingTaskId(null);
+		setName('');
+		setEstimate('1');
+		setError(null);
+	};
+
+	const editTask = (taskId: string) => {
+		const task = stateRef.current.tasks.find((candidate) => candidate.id === taskId);
+		if (!task) return;
+		setEditingTaskId(task.id);
+		setName(task.name);
+		setEstimate(String(task.estimate));
+		setError(null);
+	};
+
+	const updateTaskDrag = (event: PointerEvent) => {
+		const taskId = draggedTaskId.current;
+		const list = taskListRef.current;
+		if (!taskId || !list) return;
+		const fromIndex = stateRef.current.tasks.findIndex((task) => task.id === taskId);
+		const items = Array.from(list.querySelectorAll('li'));
+		if (fromIndex === -1 || items.length === 0) return;
+
+		let toIndex = items.findIndex((item) => {
+			const bounds = item.getBoundingClientRect();
+			return event.clientY < bounds.top + bounds.height / 2;
+		});
+		if (toIndex === -1) toIndex = items.length - 1;
+		else if (toIndex > fromIndex) toIndex -= 1;
+		draggedToIndex.current = toIndex;
+	};
+
+	const finishTaskDrag = (event: PointerEvent, taskId: string) => {
+		if (draggedTaskId.current !== taskId || draggedPointerId.current !== event.pointerId) return;
+		updateTaskDrag(event);
+		const toIndex = draggedToIndex.current;
+		draggedTaskId.current = null;
+		draggedPointerId.current = null;
+		draggedToIndex.current = null;
+		if (toIndex !== null) dispatch({ type: 'MOVE_TASK', id: taskId, toIndex });
+	};
+
+	const cancelTaskDrag = (taskId: string, pointerId: number) => {
+		if (draggedTaskId.current !== taskId || draggedPointerId.current !== pointerId) return;
+		draggedTaskId.current = null;
+		draggedPointerId.current = null;
+		draggedToIndex.current = null;
+	};
+
+	const cancelEdit = () => {
+		setEditingTaskId(null);
 		setName('');
 		setEstimate('1');
 		setError(null);
@@ -183,7 +242,9 @@ export function App() {
 				{activeTask && (
 					<p class="active-task">
 						{activeTask.name}{' '}
-						<span class="task-count">
+						<span
+							class={`task-count${activeTask.pomodoroCount > activeTask.estimate ? ' warning' : ''}`}
+						>
 							{activeTask.pomodoroCount}/{activeTask.estimate}
 						</span>
 					</p>
@@ -259,9 +320,9 @@ export function App() {
 				{state.tasks.length === 0 ? (
 					<p class="placeholder">{strings.tasks.emptyHint}</p>
 				) : (
-					<ul class="task-list">
+					<ul class="task-list" ref={taskListRef}>
 						{state.tasks.map((task) => (
-							<li key={task.id}>
+							<li key={task.id} data-task-id={task.id}>
 								<button
 									class={`task${task.id === state.activeTaskId ? ' active' : ''}`}
 									type="button"
@@ -271,15 +332,45 @@ export function App() {
 									onClick={() => dispatch({ type: 'SELECT_TASK', at: Date.now(), id: task.id })}
 								>
 									<span>{task.name}</span>
-									<span class="task-count">
+									<span
+										class={`task-count${task.pomodoroCount > task.estimate ? ' warning' : ''}`}
+									>
 										{task.pomodoroCount}/{task.estimate}
 									</span>
+								</button>
+								<button
+									class="task-handle"
+									type="button"
+									aria-label={`${strings.tasks.reorder}: ${task.name}`}
+									onPointerDown={(event) => {
+										if (event.button !== 0 || !event.isPrimary) return;
+										event.preventDefault();
+										draggedTaskId.current = task.id;
+										draggedPointerId.current = event.pointerId;
+										draggedToIndex.current = stateRef.current.tasks.findIndex(
+											(candidate) => candidate.id === task.id,
+										);
+										event.currentTarget.setPointerCapture(event.pointerId);
+									}}
+									onPointerMove={updateTaskDrag}
+									onPointerUp={(event) => finishTaskDrag(event, task.id)}
+									onPointerCancel={(event) => cancelTaskDrag(task.id, event.pointerId)}
+									onLostPointerCapture={(event) => cancelTaskDrag(task.id, event.pointerId)}
+								>
+									⋮⋮
+								</button>
+								<button
+									type="button"
+									aria-label={`${strings.tasks.edit}: ${task.name}`}
+									onClick={() => editTask(task.id)}
+								>
+									{strings.tasks.edit}
 								</button>
 							</li>
 						))}
 					</ul>
 				)}
-				<form class="task-form" onSubmit={addTask} noValidate>
+				<form class="task-form" onSubmit={saveTask} noValidate>
 					<label>
 						{strings.tasks.nameLabel}
 						<input
@@ -302,8 +393,13 @@ export function App() {
 						/>
 					</label>
 					<button class="primary" type="submit">
-						{strings.tasks.add}
+						{editingTaskId === null ? strings.tasks.add : strings.tasks.save}
 					</button>
+					{editingTaskId !== null && (
+						<button type="button" onClick={cancelEdit}>
+							{strings.tasks.cancel}
+						</button>
+					)}
 				</form>
 				{error && (
 					<p class="form-error" role="alert">

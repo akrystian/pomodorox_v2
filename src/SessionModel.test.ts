@@ -99,6 +99,62 @@ describe('SessionModel', () => {
 	});
 });
 
+describe('Task list shaping', () => {
+	it('moves a Task to its new Priority without changing the others’ order', () => {
+		const state = {
+			...initialState(),
+			tasks: [
+				{ id: 'first', name: 'First', estimate: 1, pomodoroCount: 0 },
+				{ id: 'second', name: 'Second', estimate: 2, pomodoroCount: 1 },
+				{ id: 'third', name: 'Third', estimate: 3, pomodoroCount: 2 },
+			],
+			activeTaskId: 'second',
+		};
+
+		const result = reduce(state, { type: 'MOVE_TASK', id: 'third', toIndex: 0 });
+
+		expect(result.state.tasks.map((task) => task.id)).toEqual(['third', 'first', 'second']);
+		expect(result.state.activeTaskId).toBe('second');
+		expect(result.effects).toEqual([{ type: 'persist' }]);
+	});
+
+	it('edits a Task name and Estimate while preserving its Pomodoro Count', () => {
+		const state = {
+			...initialState(),
+			tasks: [{ id: 'task', name: 'Old name', estimate: 2, pomodoroCount: 3 }],
+		};
+
+		const result = reduce(state, {
+			type: 'EDIT_TASK',
+			id: 'task',
+			name: '  New name  ',
+			estimate: '5',
+		});
+
+		expect(result.state.tasks).toEqual([
+			{ id: 'task', name: 'New name', estimate: 5, pomodoroCount: 3 },
+		]);
+		expect(result.effects).toEqual([{ type: 'persist' }]);
+	});
+
+	it('uses the same validation rules when editing a Task as when adding one', () => {
+		const state = {
+			...initialState(),
+			tasks: [{ id: 'task', name: 'Existing', estimate: 2, pomodoroCount: 0 }],
+		};
+
+		expect(
+			reduce(state, { type: 'EDIT_TASK', id: 'task', name: '  ', estimate: 2 }),
+		).toMatchObject({ state, outcome: { type: 'rejected', reason: 'Zadanie musi mieć nazwę.' } });
+		expect(
+			reduce(state, { type: 'EDIT_TASK', id: 'task', name: 'Changed', estimate: '1.5' }),
+		).toMatchObject({
+			state,
+			outcome: { type: 'rejected', reason: 'Estimate musi być liczbą całkowitą ≥ 1.' },
+		});
+	});
+});
+
 const T0 = 1_761_500_000_000;
 const MIN = 60_000;
 const REPORT_ID = '8c443e19-e4ca-4d94-8215-22a564032f57';
