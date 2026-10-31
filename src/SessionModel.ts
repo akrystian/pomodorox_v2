@@ -65,6 +65,7 @@ export type SessionAction =
 	| { type: 'MOVE_TASK'; id: string; toIndex: number }
 	| { type: 'MARK_DONE'; at: number; id: string; confirmed?: boolean }
 	| { type: 'RESTORE'; id: string }
+	| { type: 'DELETE'; at: number; id: string; confirmed?: boolean }
 	| { type: 'SELECT_TASK'; at: number; id: string }
 	| { type: 'START'; at: number; kind: SessionKind; confirmed?: boolean }
 	| { type: 'STOP'; at: number }
@@ -258,9 +259,12 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 		}
 
 		case 'MARK_DONE': {
-			const task = state.tasks.find((candidate) => candidate.id === action.id);
-			if (!task) return reject(state, strings.tasks.unknownTask);
+			if (!state.tasks.some((candidate) => candidate.id === action.id)) {
+				return reject(state, strings.tasks.unknownTask);
+			}
 			const settled = completeIfElapsed(state, action.at);
+			const task = settled.state.tasks.find((candidate) => candidate.id === action.id);
+			if (!task) return reject(state, strings.tasks.unknownTask);
 			const session = settled.state.session;
 			const abandoningWork = session?.kind === 'work' && session.taskId === action.id;
 			if (abandoningWork && !action.confirmed) {

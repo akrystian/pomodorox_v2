@@ -276,6 +276,25 @@ describe('Done Tasks', () => {
 		});
 	});
 
+	it('completes elapsed Work before moving the Task to Done', () => {
+		const state = runningWork();
+
+		const result = reduce(state, {
+			type: 'MARK_DONE',
+			at: T0 + 25 * MIN + 5_000,
+			id: REPORT_ID,
+		});
+
+		expect(result.state.session).toBeNull();
+		expect(result.state.tasks).toEqual([state.tasks[1]]);
+		expect(result.state.doneTasks).toEqual([{ ...state.tasks[0], pomodoroCount: 1 }]);
+		expect(result.state.events.at(-1)).toMatchObject({
+			at: T0 + 25 * MIN,
+			type: 'completed',
+			durationMs: 25 * MIN,
+		});
+	});
+
 	it('always asks for confirmation before deleting a Task', () => {
 		const state = withTasks();
 

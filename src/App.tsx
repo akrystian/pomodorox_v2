@@ -7,7 +7,7 @@ import type { SessionAction, SessionState } from './SessionModel';
 import { loadState, saveState } from './statePersistence';
 
 type StartAction = Extract<SessionAction, { type: 'START' }>;
-type PendingAction = StartAction | Extract<SessionAction, { type: 'CLEAR_LOG' }>;
+type PendingAction = StartAction | Extract<SessionAction, { type: 'CLEAR_LOG' | 'MARK_DONE' | 'DELETE' }>;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -141,6 +141,20 @@ export function App() {
 		const outcome = dispatch(action);
 		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
 	};
+
+	const markDone = (id: string) => {
+		const action: PendingAction = { type: 'MARK_DONE', at: Date.now(), id };
+		const outcome = dispatch(action);
+		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
+	};
+
+	const deleteTask = (id: string) => {
+		const action: PendingAction = { type: 'DELETE', at: Date.now(), id };
+		const outcome = dispatch(action);
+		if (outcome.type === 'confirm') setPending({ action, question: outcome.question });
+	};
+
+	const restoreTask = (id: string) => dispatch({ type: 'RESTORE', id });
 
 	const stop = () => {
 		const at = Date.now();
@@ -366,6 +380,16 @@ export function App() {
 								>
 									{strings.tasks.edit}
 								</button>
+								<button type="button" onClick={() => markDone(task.id)}>
+									{strings.tasks.markDone}
+								</button>
+								<button
+									type="button"
+									aria-label={`${strings.tasks.delete}: ${task.name}`}
+									onClick={() => deleteTask(task.id)}
+								>
+									{strings.tasks.delete}
+								</button>
 							</li>
 						))}
 					</ul>
@@ -405,6 +429,33 @@ export function App() {
 					<p class="form-error" role="alert">
 						{error}
 					</p>
+				)}
+				{state.doneTasks.length > 0 && (
+					<details>
+						<summary>{strings.tasks.doneHeading(state.doneTasks.length)}</summary>
+						<ul class="task-list">
+							{state.doneTasks.map((task) => (
+								<li key={task.id}>
+									<div class="task">
+										<span>{task.name}</span>
+										<span class="task-count">
+											{task.pomodoroCount}/{task.estimate}
+										</span>
+									</div>
+									<button type="button" onClick={() => restoreTask(task.id)}>
+										{strings.tasks.restore}
+									</button>
+									<button
+										type="button"
+										aria-label={`${strings.tasks.delete}: ${task.name}`}
+										onClick={() => deleteTask(task.id)}
+									>
+										{strings.tasks.delete}
+									</button>
+								</li>
+							))}
+						</ul>
+					</details>
 				)}
 			</section>
 			<section class="section" aria-labelledby="log-heading">
