@@ -24,6 +24,7 @@ describe('state persistence', () => {
 		const storage = memoryStorage();
 		const state: SessionState = {
 			tasks: [task],
+			doneTasks: [],
 			activeTaskId: task.id,
 			session: {
 				kind: 'work',
@@ -50,7 +51,7 @@ describe('state persistence', () => {
 		saveState(state, storage);
 
 		expect(JSON.parse(storage.values.get(STORAGE_KEY)!)).toEqual({
-			schemaVersion: 3,
+			schemaVersion: 4,
 			state,
 		});
 		expect(loadState(storage)).toEqual(state);
@@ -62,6 +63,7 @@ describe('state persistence', () => {
 
 		expect(loadState(storage)).toEqual({
 			tasks: [task],
+			doneTasks: [],
 			activeTaskId: null,
 			session: null,
 			events: [],
@@ -84,6 +86,7 @@ describe('state persistence', () => {
 
 		expect(loadState(storage)).toEqual({
 			...state,
+			doneTasks: [],
 			soundEnabled: true,
 			notificationsEnabled: true,
 			notificationPermission: 'default',
@@ -91,10 +94,28 @@ describe('state persistence', () => {
 		});
 	});
 
+	it('adds an empty Done section when loading schema version 3', () => {
+		const storage = memoryStorage();
+		const state = {
+			tasks: [task],
+			activeTaskId: task.id,
+			session: null,
+			events: [],
+			soundEnabled: true,
+			notificationsEnabled: true,
+			notificationPermission: 'default',
+			permissionPrompted: false,
+		};
+		storage.setItem(STORAGE_KEY, JSON.stringify({ schemaVersion: 3, state }));
+
+		expect(loadState(storage)).toEqual({ ...state, doneTasks: [] });
+	});
+
 	it('round-trips abandoned Events', () => {
 		const storage = memoryStorage();
 		const state: SessionState = {
 			tasks: [task],
+			doneTasks: [],
 			activeTaskId: task.id,
 			session: null,
 			events: [

@@ -2,7 +2,7 @@ import { EVENT_TYPES, SESSION_KINDS, initialState } from './SessionModel';
 import type { Session, SessionEvent, SessionState, Task } from './SessionModel';
 
 export const STORAGE_KEY = 'pomodorox.session';
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 type StorageAdapter = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -60,6 +60,8 @@ function isSessionState(value: unknown): value is SessionState {
 		isRecord(value) &&
 		Array.isArray(value.tasks) &&
 		value.tasks.every(isTask) &&
+		Array.isArray(value.doneTasks) &&
+		value.doneTasks.every(isTask) &&
 		isNullableString(value.activeTaskId) &&
 		(value.session === null || isSession(value.session)) &&
 		Array.isArray(value.events) &&
@@ -75,6 +77,7 @@ function isSessionState(value: unknown): value is SessionState {
 function migrate(schemaVersion: unknown, state: unknown): unknown {
 	if (schemaVersion === 1 && isRecord(state)) return { ...initialState(), tasks: state.tasks };
 	if (schemaVersion === 2 && isRecord(state)) return { ...initialState(), ...state };
+	if (schemaVersion === 3 && isRecord(state)) return { ...initialState(), ...state };
 	if (schemaVersion === SCHEMA_VERSION) return state;
 	return null;
 }
