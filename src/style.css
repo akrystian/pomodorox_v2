@@ -5,6 +5,7 @@
 	--line: #e7e5e4;
 	--bg: #fafaf9;
 	--card: #ffffff;
+	--warning: #b91c1c;
 
 	color-scheme: light dark;
 	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -21,6 +22,7 @@
 		--line: #44403c;
 		--bg: #1c1917;
 		--card: #292524;
+		--warning: #f87171;
 	}
 }
 
@@ -71,7 +73,16 @@ body {
 	list-style: none;
 }
 
+.task-list > li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
 .task {
+	flex: 1;
+	min-width: 0;
+	width: auto;
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -99,6 +110,21 @@ body {
 .task-count {
 	font-variant-numeric: tabular-nums;
 	font-weight: 600;
+}
+
+.task-count.warning {
+	color: var(--warning);
+}
+
+.task-handle {
+	padding: 6px 10px;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.task-handle:active {
+	cursor: grabbing;
 }
 
 .time-left {
