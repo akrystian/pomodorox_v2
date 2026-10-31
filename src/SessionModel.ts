@@ -60,6 +60,8 @@ export type SessionAction =
 			name: string;
 			estimate?: number | string;
 	  }
+	| { type: 'EDIT_TASK'; id: string; name: string; estimate?: number | string }
+	| { type: 'MOVE_TASK'; id: string; toIndex: number }
 	| { type: 'SELECT_TASK'; at: number; id: string }
 	| { type: 'START'; at: number; kind: SessionKind; confirmed?: boolean }
 	| { type: 'STOP'; at: number }
@@ -197,24 +199,58 @@ const reject = (state: SessionState, reason: string): ReduceResult => ({
 	effects: [],
 });
 
+const validateTaskDetails = (
+	name: string,
+	estimateValue: number | string | undefined,
+): { name: string; estimate: number } | string => {
+	const trimmedName = name.trim();
+	if (!trimmedName) return strings.tasks.invalidName;
+
+	const estimate = Number(estimateValue ?? 1);
+	if (!Number.isInteger(estimate) || estimate < 1) return strings.tasks.invalidEstimate;
+
+	return { name: trimmedName, estimate };
+};
+
 export function reduce(state: SessionState, action: SessionAction): ReduceResult {
 	switch (action.type) {
 		case 'ADD_TASK': {
-			const name = action.name.trim();
-			if (!name) return reject(state, strings.tasks.invalidName);
-
-			const estimate = Number(action.estimate ?? 1);
-			if (!Number.isInteger(estimate) || estimate < 1) {
-				return reject(state, strings.tasks.invalidEstimate);
-			}
+			const details = validateTaskDetails(action.name, action.estimate);
+			if (typeof details === 'string') return reject(state, details);
 
 			const task: Task = {
 				id: action.id,
-				name,
-				estimate,
+				...details,
 				pomodoroCount: 0,
 			};
 			return ok({ ...state, tasks: [...state.tasks, task] });
+		}
+
+		case 'EDIT_TASK': {
+			if (!state.tasks.some((task) => task.id === action.id)) {
+				return reject(state, strings.tasks.unknownTask);
+			}
+			const details = validateTaskDetails(action.name, action.estimate);
+			if (typeof details === 'string') return reject(state, details);
+
+			return ok({
+				...state,
+				tasks: state.tasks.map((task) => (task.id === action.id ? { ...task, ...details } : task)),
+			});
+		}
+
+		case 'MOVE_TASK': {
+			const fromIndex = state.tasks.findIndex((task) => task.id === action.id);
+			if (fromIndex === -1) return reject(state, strings.tasks.unknownTask);
+			if (!Number.isInteger(action.toIndex) || action.toIndex < 0 || action.toIndex >= state.tasks.length) {
+				return reject(state, strings.tasks.invalidPosition);
+			}
+			if (fromIndex === action.toIndex) return ok(state);
+
+			const tasks = [...state.tasks];
+			const [task] = tasks.splice(fromIndex, 1);
+			tasks.splice(action.toIndex, 0, task!);
+			return ok({ ...state, tasks });
 		}
 
 		case 'SELECT_TASK':
