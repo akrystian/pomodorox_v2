@@ -64,6 +64,7 @@ export type SessionAction =
 	| { type: 'EDIT_TASK'; id: string; name: string; estimate?: number | string }
 	| { type: 'MOVE_TASK'; id: string; toIndex: number }
 	| { type: 'MARK_DONE'; at: number; id: string; confirmed?: boolean }
+	| { type: 'RESTORE'; id: string }
 	| { type: 'SELECT_TASK'; at: number; id: string }
 	| { type: 'START'; at: number; kind: SessionKind; confirmed?: boolean }
 	| { type: 'STOP'; at: number }
@@ -259,12 +260,59 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 		case 'MARK_DONE': {
 			const task = state.tasks.find((candidate) => candidate.id === action.id);
 			if (!task) return reject(state, strings.tasks.unknownTask);
+			const settled = completeIfElapsed(state, action.at);
+			const session = settled.state.session;
+			const abandoningWork = session?.kind === 'work' && session.taskId === action.id;
+			if (abandoningWork && !action.confirmed) {
+				return needConfirm(state, strings.tasks.confirmDoneAbandon);
+			}
+			const current =
+				abandoningWork && session
+					? abandon({ ...settled.state, session }, action.at)
+					: settled.state;
+			return ok({
+				...current,
+				tasks: current.tasks.filter((candidate) => candidate.id !== action.id),
+				doneTasks: [...current.doneTasks, task],
+				activeTaskId: current.activeTaskId === action.id ? null : current.activeTaskId,
+			}, settled.effects);
+		}
+
+		case 'RESTORE': {
+			const task = state.doneTasks.find((candidate) => candidate.id === action.id);
+			if (!task) return reject(state, strings.tasks.unknownTask);
 			return ok({
 				...state,
-				tasks: state.tasks.filter((candidate) => candidate.id !== action.id),
-				doneTasks: [...state.doneTasks, task],
-				activeTaskId: state.activeTaskId === action.id ? null : state.activeTaskId,
+				tasks: [...state.tasks, task],
+				doneTasks: state.doneTasks.filter((candidate) => candidate.id !== action.id),
 			});
+		}
+
+		case 'DELETE': {
+			const exists =
+				state.tasks.some((task) => task.id === action.id) ||
+				state.doneTasks.some((task) => task.id === action.id);
+			if (!exists) return reject(state, strings.tasks.unknownTask);
+
+			const settled = completeIfElapsed(state, action.at);
+			const session = settled.state.session;
+			const abandoningWork = session?.kind === 'work' && session.taskId === action.id;
+			if (!action.confirmed) {
+				return needConfirm(
+					state,
+					abandoningWork ? strings.tasks.confirmDeleteAbandon : strings.tasks.confirmDelete,
+				);
+			}
+			const current =
+				abandoningWork && session
+					? abandon({ ...settled.state, session }, action.at)
+					: settled.state;
+			return ok({
+				...current,
+				tasks: current.tasks.filter((task) => task.id !== action.id),
+				doneTasks: current.doneTasks.filter((task) => task.id !== action.id),
+				activeTaskId: current.activeTaskId === action.id ? null : current.activeTaskId,
+			}, settled.effects);
 		}
 
 		case 'SELECT_TASK':

@@ -204,6 +204,146 @@ describe('Done Tasks', () => {
 		expect(result.state.doneTasks.map((task) => task.id)).toEqual([REPORT_ID]);
 		expect(result.state.activeTaskId).toBeNull();
 	});
+
+	it('restores a Done Task to the bottom of the main list', () => {
+		const state = {
+			...withTasks(),
+			tasks: [{ id: MAIL_ID, name: 'Maile', estimate: 1, pomodoroCount: 0 }],
+			doneTasks: [{ id: REPORT_ID, name: 'Raport kwartalny', estimate: 4, pomodoroCount: 2 }],
+			activeTaskId: MAIL_ID,
+		};
+
+		const result = reduce(state, { type: 'RESTORE', id: REPORT_ID });
+
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state.tasks.map((task) => task.id)).toEqual([MAIL_ID, REPORT_ID]);
+		expect(result.state.doneTasks).toEqual([]);
+		expect(result.state.activeTaskId).toBe(MAIL_ID);
+	});
+
+	it('rejects selecting a Done Task', () => {
+		const state = {
+			...withTasks(),
+			tasks: [{ id: MAIL_ID, name: 'Maile', estimate: 1, pomodoroCount: 0 }],
+			doneTasks: [{ id: REPORT_ID, name: 'Raport kwartalny', estimate: 4, pomodoroCount: 2 }],
+		};
+
+		const result = reduce(state, { type: 'SELECT_TASK', at: T0, id: REPORT_ID });
+
+		expect(result).toMatchObject({
+			state,
+			outcome: { type: 'rejected' },
+			effects: [],
+		});
+	});
+
+	it('asks before abandoning Work when its Active Task is marked Done', () => {
+		const state = runningWork();
+
+		const result = reduce(state, { type: 'MARK_DONE', at: T0 + 10 * MIN, id: REPORT_ID });
+
+		expect(result).toEqual({
+			state,
+			outcome: {
+				type: 'confirm',
+				question: 'Porzucić bieżącą sesję i oznaczyć zadanie jako gotowe?',
+			},
+			effects: [],
+		});
+	});
+
+	it('abandons Work before marking its Active Task Done when confirmed', () => {
+		const state = runningWork();
+
+		const result = reduce(state, {
+			type: 'MARK_DONE',
+			at: T0 + 10 * MIN,
+			id: REPORT_ID,
+			confirmed: true,
+		});
+
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state.session).toBeNull();
+		expect(result.state.activeTaskId).toBeNull();
+		expect(result.state.tasks.map((task) => task.id)).toEqual([MAIL_ID]);
+		expect(result.state.doneTasks.map((task) => task.id)).toEqual([REPORT_ID]);
+		expect(result.state.events.at(-1)).toEqual({
+			at: T0 + 10 * MIN,
+			type: 'abandoned',
+			kind: 'work',
+			taskName: 'Raport kwartalny',
+			durationMs: 10 * MIN,
+		});
+	});
+
+	it('always asks for confirmation before deleting a Task', () => {
+		const state = withTasks();
+
+		const result = reduce(state, { type: 'DELETE', at: T0, id: REPORT_ID });
+
+		expect(result).toEqual({
+			state,
+			outcome: { type: 'confirm', question: 'Usunąć to zadanie?' },
+			effects: [],
+		});
+	});
+
+	it('deletes a confirmed Task without deleting its Events', () => {
+		const selected = reduce(withTasks(), { type: 'SELECT_TASK', at: T0, id: REPORT_ID }).state;
+		const event = {
+			at: T0,
+			type: 'started' as const,
+			kind: 'work' as const,
+			taskName: 'Raport kwartalny',
+			durationMs: null,
+		};
+		const state = { ...selected, events: [event] };
+
+		const result = reduce(state, { type: 'DELETE', at: T0 + MIN, id: REPORT_ID, confirmed: true });
+
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state.tasks.map((task) => task.id)).toEqual([MAIL_ID]);
+		expect(result.state.activeTaskId).toBeNull();
+		expect(result.state.events).toEqual([event]);
+	});
+
+	it('asks to abandon Work before deleting its Active Task', () => {
+		const state = runningWork();
+
+		const result = reduce(state, { type: 'DELETE', at: T0 + 10 * MIN, id: REPORT_ID });
+
+		expect(result).toEqual({
+			state,
+			outcome: {
+				type: 'confirm',
+				question: 'Porzucić bieżącą sesję i usunąć zadanie?',
+			},
+			effects: [],
+		});
+	});
+
+	it('records an abandoned Work Session before deleting its Task when confirmed', () => {
+		const state = runningWork();
+
+		const result = reduce(state, {
+			type: 'DELETE',
+			at: T0 + 10 * MIN,
+			id: REPORT_ID,
+			confirmed: true,
+		});
+
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state.session).toBeNull();
+		expect(result.state.activeTaskId).toBeNull();
+		expect(result.state.tasks.map((task) => task.id)).toEqual([MAIL_ID]);
+		expect(result.state.events.at(-1)).toEqual({
+			at: T0 + 10 * MIN,
+			type: 'abandoned',
+			kind: 'work',
+			taskName: 'Raport kwartalny',
+			durationMs: 10 * MIN,
+		});
+	});
 });
 
 describe('Work Session', () => {
