@@ -66,6 +66,7 @@ export type SessionAction =
 	| { type: 'PAUSE'; at: number }
 	| { type: 'RESUME'; at: number }
 	| { type: 'TICK'; at: number; silent?: boolean }
+	| { type: 'REOPEN'; at: number }
 	| { type: 'TOGGLE_SOUND' }
 	| { type: 'TOGGLE_NOTIFICATIONS' }
 	| { type: 'PERMISSION_ANSWER'; permission: NotificationPermission }
@@ -281,6 +282,16 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 				pausedTotal: session.pausedTotal + (action.at - session.pausedAt),
 			};
 			return ok(logEvent({ ...state, session: resumed }, action.at, 'resumed'));
+		}
+
+		case 'REOPEN': {
+			const settled = completeIfElapsed(state, action.at);
+			if (settled.state === state) return { state, outcome: { type: 'ok' }, effects: [] };
+			// Silent: only the in-app banner, no sound or system notification.
+			const effects = settled.effects.flatMap((effect): Effect[] =>
+				effect.type === 'banner' ? [{ ...effect, text: strings.timer.endedWhileClosed(effect.text) }] : [],
+			);
+			return ok(settled.state, effects);
 		}
 
 		case 'CLEAR_LOG':

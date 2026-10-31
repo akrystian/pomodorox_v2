@@ -21,6 +21,9 @@ export const strings = {
 		noSession: 'Nie ma sesji do zatrzymania.',
 		workCompleted: (taskName: string, pomodoroCount: number, estimate: number) =>
 			`Praca zakończona: ${taskName} (${pomodoroCount}/${estimate}). Czas na przerwę.`,
+		endedWhileClosed: (summary: string) => `Sesja zakończyła się, gdy aplikacja była zamknięta. ${summary}`,
+		keepOpenNote:
+			'Aplikacja musi pozostać otwarta (także w tle), aby powiadomienia docierały na czas.',
 		breakCompleted: 'Przerwa zakończona. Wracamy do pracy?',
 		breakNotification: 'Przerwa zakończona…',
 	},

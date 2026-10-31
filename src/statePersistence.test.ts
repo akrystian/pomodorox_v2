@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadState, saveState, SCHEMA_VERSION, STORAGE_KEY } from './statePersistence';
+import { initialState, reduce } from './SessionModel';
 import type { SessionState } from './SessionModel';
 
 const memoryStorage = () => {
@@ -109,5 +110,35 @@ describe('state persistence', () => {
 		saveState(state, storage);
 
 		expect(loadState(storage)).toEqual(state);
+	});
+});
+
+describe('reopen after reload', () => {
+	const base = (pausedAt: number | null): SessionState => ({
+		...initialState(),
+		tasks: [task],
+		activeTaskId: task.id,
+		session: { kind: 'work', taskId: task.id, startedAt: 1000, pausedAt, pausedTotal: 0 },
+		events: [],
+	});
+
+	it('restores a running Session and completes it at scheduledEnd when elapsed', () => {
+		const storage = memoryStorage();
+		saveState(base(null), storage);
+
+		const result = reduce(loadState(storage), { type: 'REOPEN', at: 1000 + 60 * 60_000 });
+
+		expect(result.state.session).toBeNull();
+		expect(result.state.tasks[0]?.pomodoroCount).toBe(1);
+		expect(result.state.events.at(-1)?.at).toBe(1000 + 25 * 60_000);
+	});
+
+	it('restores a paused Session still paused', () => {
+		const storage = memoryStorage();
+		saveState(base(1000 + 60_000), storage);
+
+		const result = reduce(loadState(storage), { type: 'REOPEN', at: 1000 + 600 * 60_000 });
+
+		expect(result.state.session?.pausedAt).toBe(1000 + 60_000);
 	});
 });
