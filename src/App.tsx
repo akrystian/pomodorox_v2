@@ -25,6 +25,7 @@ const formatRemaining = (ms: number) => {
 export function App() {
 	const [state, setState] = useState<SessionState>(() => loadState());
 	const stateRef = useRef(state);
+	const initialSession = useRef(state.session !== null);
 	const [now, setNow] = useState(() => Date.now());
 	const [banner, setBanner] = useState<string | null>(null);
 	const [pending, setPending] = useState<{ action: PendingAction; question: string } | null>(null);
@@ -39,26 +40,59 @@ export function App() {
 		for (const effect of result.effects) {
 			if (effect.type === 'persist') saveState(result.state);
 			if (effect.type === 'banner') setBanner(effect.text);
+			if (effect.type === 'sound') {
+				const audio = new Audio(`${import.meta.env.BASE_URL}session-end.wav`);
+				void audio.play().catch(() => {});
+			}
+			if (effect.type === 'notification' && typeof Notification !== 'undefined') {
+				if (Notification.permission === 'granted') {
+					try {
+						new Notification(strings.appName, { body: effect.text });
+					} catch {
+						// Permission may have changed since the reducer emitted the effect.
+					}
+				}
+			}
+			if (effect.type === 'permissionPrompt') {
+				if (typeof Notification === 'undefined') {
+					dispatch({ type: 'PERMISSION_ANSWER', permission: 'denied' });
+				} else {
+					void Notification.requestPermission()
+						.then((permission) => dispatch({ type: 'PERMISSION_ANSWER', permission }))
+						.catch(() => dispatch({ type: 'PERMISSION_ANSWER', permission: 'denied' }));
+				}
+			}
 		}
 		return result.outcome;
 	};
+
+	useEffect(() => {
+		if (
+			typeof Notification !== 'undefined' &&
+			Notification.permission !== stateRef.current.notificationPermission
+		) {
+			dispatch({ type: 'PERMISSION_ANSWER', permission: Notification.permission });
+		}
+	}, []);
 
 	// Clock driver: ticks about once a second while a Session runs, and as soon as
 	// the tab becomes visible again so a throttled background tab catches up.
 	const { session } = state;
 	useEffect(() => {
 		if (!session) return;
-		const tick = () => {
+		const tick = (silent = false) => {
 			const at = Date.now();
 			setNow(at);
-			dispatch({ type: 'TICK', at });
+			dispatch({ type: 'TICK', at, silent });
 		};
-		tick();
-		const interval = setInterval(tick, 1000);
-		document.addEventListener('visibilitychange', tick);
+		tick(initialSession.current);
+		initialSession.current = false;
+		const refresh = () => tick();
+		const interval = setInterval(refresh, 1000);
+		document.addEventListener('visibilitychange', refresh);
 		return () => {
 			clearInterval(interval);
-			document.removeEventListener('visibilitychange', tick);
+			document.removeEventListener('visibilitychange', refresh);
 		};
 	}, [session]);
 
@@ -171,6 +205,33 @@ export function App() {
 						</button>
 					)}
 				</div>
+				<div class="timer-settings">
+					<label>
+						<input
+							type="checkbox"
+							checked={state.soundEnabled}
+							onChange={() => dispatch({ type: 'TOGGLE_SOUND' })}
+						/>
+						{strings.settings.sound}
+					</label>
+					<label>
+						<input
+							type="checkbox"
+							checked={state.notificationsEnabled}
+							disabled={state.notificationPermission === 'denied'}
+							aria-describedby={
+								state.notificationPermission === 'denied' ? 'notifications-hint' : undefined
+							}
+							onChange={() => dispatch({ type: 'TOGGLE_NOTIFICATIONS' })}
+						/>
+						{strings.settings.notifications}
+					</label>
+				</div>
+				{state.notificationPermission === 'denied' && (
+					<p id="notifications-hint" class="placeholder">
+						{strings.settings.notificationsDenied}
+					</p>
+				)}
 				{!activeTask && (
 					<p id="work-hint" class="placeholder">
 						{strings.timer.noActiveTask}

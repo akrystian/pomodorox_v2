@@ -11,7 +11,12 @@ export default defineConfig({
 		preact(),
 		VitePWA({
 			registerType: 'prompt',
-			includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png'],
+			includeAssets: [
+				'favicon.svg',
+				'favicon.ico',
+				'apple-touch-icon-180x180.png',
+				'session-end.wav',
+			],
 			manifest: {
 				name: 'Pomodorox',
 				short_name: 'Pomodorox',

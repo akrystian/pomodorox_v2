@@ -22,6 +22,13 @@ export const strings = {
 		workCompleted: (taskName: string, pomodoroCount: number, estimate: number) =>
 			`Praca zakończona: ${taskName} (${pomodoroCount}/${estimate}). Czas na przerwę.`,
 		breakCompleted: 'Przerwa zakończona. Wracamy do pracy?',
+		breakNotification: 'Przerwa zakończona…',
+	},
+	settings: {
+		sound: 'Dźwięk',
+		notifications: 'Powiadomienia',
+		notificationsDenied:
+			'Powiadomienia są zablokowane. Zmień uprawnienia tej witryny w ustawieniach przeglądarki.',
 	},
 	tasks: {
 		heading: 'Zadania',
