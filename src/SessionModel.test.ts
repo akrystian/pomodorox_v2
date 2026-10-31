@@ -193,6 +193,19 @@ describe('Active Task', () => {
 	});
 });
 
+describe('Done Tasks', () => {
+	it('moves a Task out of the main list and clears it when it was Active', () => {
+		const state = { ...withTasks(), activeTaskId: REPORT_ID };
+
+		const result = reduce(state, { type: 'MARK_DONE', at: T0, id: REPORT_ID });
+
+		expect(result.outcome).toEqual({ type: 'ok' });
+		expect(result.state.tasks.map((task) => task.id)).toEqual([MAIL_ID]);
+		expect(result.state.doneTasks.map((task) => task.id)).toEqual([REPORT_ID]);
+		expect(result.state.activeTaskId).toBeNull();
+	});
+});
+
 describe('Work Session', () => {
 	it('rejects starting Work without an Active Task', () => {
 		const state = withTasks();

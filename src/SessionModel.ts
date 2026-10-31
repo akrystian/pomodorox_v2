@@ -43,6 +43,7 @@ export type SessionEvent = {
 
 export type SessionState = {
 	tasks: Task[];
+	doneTasks: Task[];
 	activeTaskId: string | null;
 	session: Session | null;
 	events: SessionEvent[];
@@ -62,6 +63,7 @@ export type SessionAction =
 	  }
 	| { type: 'EDIT_TASK'; id: string; name: string; estimate?: number | string }
 	| { type: 'MOVE_TASK'; id: string; toIndex: number }
+	| { type: 'MARK_DONE'; at: number; id: string; confirmed?: boolean }
 	| { type: 'SELECT_TASK'; at: number; id: string }
 	| { type: 'START'; at: number; kind: SessionKind; confirmed?: boolean }
 	| { type: 'STOP'; at: number }
@@ -110,6 +112,7 @@ export const todaysEvents = (events: SessionEvent[], now: number): SessionEvent[
 
 export const initialState = (): SessionState => ({
 	tasks: [],
+	doneTasks: [],
 	activeTaskId: null,
 	session: null,
 	events: [],
@@ -251,6 +254,17 @@ export function reduce(state: SessionState, action: SessionAction): ReduceResult
 			const [task] = tasks.splice(fromIndex, 1);
 			tasks.splice(action.toIndex, 0, task!);
 			return ok({ ...state, tasks });
+		}
+
+		case 'MARK_DONE': {
+			const task = state.tasks.find((candidate) => candidate.id === action.id);
+			if (!task) return reject(state, strings.tasks.unknownTask);
+			return ok({
+				...state,
+				tasks: state.tasks.filter((candidate) => candidate.id !== action.id),
+				doneTasks: [...state.doneTasks, task],
+				activeTaskId: state.activeTaskId === action.id ? null : state.activeTaskId,
+			});
 		}
 
 		case 'SELECT_TASK':
